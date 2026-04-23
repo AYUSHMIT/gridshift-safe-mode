@@ -1,0 +1,10 @@
+[
+  {"job_id": "J0001", "priority": "critical",   "power_mw": 4.5, "duration_ticks": 10, "home_dc": "BOS-1"},
+  {"job_id": "J0002", "priority": "flexible",   "power_mw": 3.2, "duration_ticks": 6,  "home_dc": "BOS-1"},
+  {"job_id": "J0003", "priority": "migratable", "power_mw": 5.8, "duration_ticks": 8,  "home_dc": "BOS-2"},
+  {"job_id": "J0004", "priority": "flexible",   "power_mw": 2.1, "duration_ticks": 4,  "home_dc": "BOS-2"},
+  {"job_id": "J0005", "priority": "migratable", "power_mw": 4.0, "duration_ticks": 7,  "home_dc": "WOR-1"},
+  {"job_id": "J0006", "priority": "critical",   "power_mw": 3.8, "duration_ticks": 12, "home_dc": "BOS-1"},
+  {"job_id": "J0007", "priority": "flexible",   "power_mw": 2.7, "duration_ticks": 5,  "home_dc": "BOS-2"},
+  {"job_id": "J0008", "priority": "migratable", "power_mw": 5.3, "duration_ticks": 9,  "home_dc": "BOS-1"}
+]
