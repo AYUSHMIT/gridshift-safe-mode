@@ -4,7 +4,17 @@ A grid-aware AI orchestrator that refuses to act on telemetry it cannot trust.
 
 ## The idea in one line
 
-Every data-center controller **cryptographically attests** to its own integrity and **signs** every telemetry packet. The orchestrator cross-checks two independent signals — cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** — which UNWINDS workloads off the untrusted node rather than freezing them in place.
+Every data-center controller **cryptographically attests** to its own integrity and **signs** every telemetry packet. The orchestrator cross-checks two independent signals — cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** — which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
+
+## Where the AI lives
+
+GridShift's AI component is honest about what it does and does not do:
+
+- **The AI does not make control decisions.** All decisions (run / delay / migrate / block) are made by a deterministic safety layer. Putting an LLM in the control loop of a power grid would be reckless; we don't do that.
+- **The AI generates operator briefings.** After each tick, the structured trust state and decision list are passed to an LLM (Claude or GPT, configurable) which produces a 3–5 sentence operator-log-style briefing: what happened, what GridShift did, and what the operator should inspect.
+- **The AI falls back cleanly offline.** If no API key is configured or the network is down, a rule-based fallback generates an operator briefing deterministically. The demo works with or without wifi.
+
+This separation — *AI for explanation, not decision* — is itself part of the pitch. It's the right architectural pattern for AI in critical infrastructure.
 
 ## Design refinement — supervisor feedback (April 2026)
 
@@ -25,6 +35,19 @@ source .venv/bin/activate           # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+### Optional: enable the LLM narrator
+
+Without an API key, the AI panel runs a deterministic rule-based fallback. To use an actual LLM:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # preferred
+# or
+export OPENAI_API_KEY=sk-...
+streamlit run app.py
+```
+
+See `.env.example` for configurable model IDs. At a venue with unreliable wifi, force offline mode with `export GRIDSHIFT_FORCE_FALLBACK=1`.
 
 ## Running the core loop without the UI
 
@@ -87,9 +110,11 @@ gridshift/
 │   ├── verifier.py             # [HW Security] orchestrator side
 │   ├── behavior_monitor.py     # [System Security]
 │   ├── safety.py               # [System Security] decision + directional safety
-│   └── orchestrator.py         # [System Security] main tick loop
+│   ├── orchestrator.py         # [System Security] main tick loop
+│   └── ai_narrator.py          # [System Security] LLM incident briefings
 ├── data/
 │   └── sample_jobs.json
+├── .env.example
 ├── requirements.txt
 └── README.md
 ```

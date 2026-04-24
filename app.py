@@ -10,6 +10,7 @@ import pandas as pd
 import altair as alt
 from core.orchestrator import GridShiftOrchestrator
 from core.state import TrustLevel
+from core.ai_narrator import IncidentNarrator
 
 
 # ---------- Setup ----------
@@ -26,6 +27,9 @@ if "orch" not in st.session_state:
     st.session_state.history = []
     st.session_state.demo_step = 0
     st.session_state.last_step_label = "(not started)"
+    st.session_state.narrator = IncidentNarrator()
+    st.session_state.briefings = {}  # tick_num -> Briefing
+    st.session_state.use_ai = True
 
 orch = st.session_state.orch
 
@@ -33,7 +37,8 @@ orch = st.session_state.orch
 
 st.title("⚡ GridShift — Grid-Aware, Trust-Verified AI Orchestration")
 st.caption(
-    "Attestation + behavioral consistency. "
+    "**AI-driven grid optimization + cryptographic trust verification.** "
+    "Deterministic safety layer decides; an LLM-powered narrator briefs the operator. "
     "Safe mode unwinds workloads off untrusted nodes — it does not freeze them."
 )
 
@@ -361,6 +366,55 @@ def build_narration(latest, orch):
 st.subheader("💡 Why this happened")
 for line in build_narration(latest, orch):
     st.markdown(f"- {line}")
+
+
+# ---------- AI Incident Briefing (LLM-generated) ----------
+
+st.subheader("🤖 AI-generated incident briefing")
+st.caption(
+    "The deterministic safety layer decides; this panel is an LLM "
+    "observer that turns the structured tick state into an operator "
+    "briefing. If no API key is configured or the network is unavailable, "
+    "a rule-based fallback runs automatically."
+)
+
+ai_c1, ai_c2 = st.columns([4, 1])
+with ai_c2:
+    st.session_state.use_ai = st.toggle(
+        "Enable AI narrator",
+        value=st.session_state.use_ai,
+        help="Turn off to see the rule-based fallback only.",
+    )
+    regenerate = st.button("🔄 Regenerate briefing")
+
+# Produce (or reuse) a briefing for this tick
+cache_key = (latest.tick, st.session_state.use_ai)
+if regenerate or cache_key not in st.session_state.briefings:
+    narrator = IncidentNarrator(prefer_llm=st.session_state.use_ai)
+    with st.spinner("Generating operator briefing..."):
+        briefing = narrator.narrate(latest)
+    st.session_state.briefings[cache_key] = briefing
+
+briefing = st.session_state.briefings[cache_key]
+
+with ai_c1:
+    if briefing.source == "anthropic":
+        badge = f"🟣 Anthropic `{briefing.model}`"
+    elif briefing.source == "openai":
+        badge = f"🟢 OpenAI `{briefing.model}`"
+    else:
+        badge = "⚙️ rule-based fallback (offline)"
+    st.caption(f"Source: {badge}  •  {briefing.latency_ms} ms")
+
+    # Render the briefing in a styled "operator log" box
+    st.markdown(
+        "<div style='padding:14px 18px; background:#F8F9FA; "
+        "border-left:5px solid #1F4E79; border-radius:4px; "
+        "font-family: Georgia, serif; font-size:15px; line-height:1.6;'>"
+        f"{briefing.text}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ---------- Directional safe-mode indicator (suggestion #6) ----------
