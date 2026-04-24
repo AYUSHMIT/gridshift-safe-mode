@@ -3,13 +3,14 @@
 [Owned by: System Security teammate - but this is the integration point
 for the whole team]
 
-The GridShiftOrchestrator is the heart of the system. Every tick it:
-  1. Advances the grid and DC simulation
-  2. Challenges each controller with a fresh nonce
-  3. Verifies the returned signed telemetry (signature + PCR + nonce)
-  4. Compares reported vs observed load (behavioral check)
-  5. Plans decisions, filters them through safe mode
-  6. Executes the surviving decisions
+Every tick:
+  1. Advance the grid + DC simulation
+  2. Challenge each controller with a fresh nonce
+  3. Verify the signed telemetry (signature + PCR + nonce)
+  4. Compare reported vs observed load (behavioral check)
+  5. Plan decisions, then run them through the safety controller
+     (directional policy + observed-load override)
+  6. Execute the surviving decisions
 """
 from core.state import TickResult
 from core.grid_model import BostonGridModel
@@ -34,7 +35,6 @@ class GridShiftOrchestrator:
         self._bootstrap_provers()
 
     def _bootstrap_provers(self):
-        """Create a keypair per DC and hand the public half to the verifier."""
         for dc_id, dc in self.fleet.dcs.items():
             priv, pub = generate_keypair()
             self.verifier.register(dc_id, pub)
@@ -52,7 +52,7 @@ class GridShiftOrchestrator:
         self.grid.set_dc_load(self.fleet.total_true_load_mw())
         grid_state = self.grid.tick()
 
-        # 2. Challenge each controller and verify the response
+        # 2. Challenge each controller and verify
         assessments = []
         for dc_id, prover in self.provers.items():
             nonce = self.verifier.issue_nonce(dc_id)
@@ -66,10 +66,12 @@ class GridShiftOrchestrator:
                 observed_load_mw=observed,
             ))
 
-        # 3. Plan actions, then filter through safe mode
+        # 3. Plan + safety filter (per-node trust map)
         raw_decisions = self.engine.plan(grid_state, self.fleet)
-        trust_levels = [a.level for a in assessments]
-        decisions, safe_mode = self.safety.apply(raw_decisions, trust_levels)
+        trust_by_node = {a.node_id: a.level for a in assessments}
+        decisions, safe_mode = self.safety.apply(
+            raw_decisions, trust_by_node, self.fleet
+        )
 
         # 4. Execute non-blocked decisions
         for d in decisions:
@@ -97,35 +99,43 @@ class GridShiftOrchestrator:
         self.fleet.submit_burst(n)
 
     def start_attack_lying(self, dc_id: str = "BOS-1", delta: float = 16.0):
-        """Scene 2: controller lies about its load. Attestation still passes."""
+        """Behavioral attack: controller lies about its load."""
         self.fleet.enable_lie(dc_id, delta)
 
     def start_attack_tamper(self, dc_id: str = "BOS-1"):
-        """Scene 2 alt: firmware tampered. Attestation fails (PCR mismatch)."""
+        """Firmware attack: PCR no longer matches known-good."""
         self.provers[dc_id].tamper_firmware()
+
+    def spike_load(self, dc_id: str = "BOS-1", extra_mw: float = 20.0):
+        """
+        Supervisor-scenario attack (step 2): after triggering a false
+        attestation failure, the adversary inflates real load. Used to
+        show that the refined safe mode UNWINDS rather than freezes.
+        """
+        self.fleet.spike(dc_id, extra_mw)
 
     def clear_attacks(self):
         for dc_id in self.fleet.dcs:
             self.fleet.disable_lie(dc_id)
             self.provers[dc_id].restore_firmware()
+            self.fleet.clear_spike(dc_id)
 
 
 if __name__ == "__main__":
-    # End-to-end smoke test
+    # End-to-end smoke test covering the supervisor-scenario attack
     orch = GridShiftOrchestrator()
     orch.trigger_heatwave(60)
     orch.submit_job_burst(14)
 
     print("--- Normal operation ---")
-    for _ in range(3):
+    for _ in range(2):
         r = orch.tick()
         print(f"tick {r.tick}: total={r.grid.total_load_mw:.1f} "
               f"safe_mode={r.safe_mode} decisions={len(r.decisions)}")
-        for a in r.assessments:
-            print(f"  {a.node_id}: {a.level.value}  {a.reason}")
 
-    print("\n--- Behavioral attack: BOS-1 lies ---")
-    orch.start_attack_lying("BOS-1", 16.0)
+    print("\n--- Supervisor scenario: false attestation failure + load spike ---")
+    orch.start_attack_tamper("BOS-1")
+    orch.spike_load("BOS-1", 25.0)
     for _ in range(2):
         r = orch.tick()
         print(f"tick {r.tick}: total={r.grid.total_load_mw:.1f} "
@@ -133,12 +143,6 @@ if __name__ == "__main__":
         for a in r.assessments:
             print(f"  {a.node_id}: {a.level.value}  {a.reason}")
         for d in r.decisions:
-            print(f"  -> {d.job_id}: {d.action.value} ({d.reason})")
-
-    print("\n--- Firmware attack: BOS-1 tampered ---")
-    orch.clear_attacks()
-    orch.start_attack_tamper("BOS-1")
-    r = orch.tick()
-    print(f"tick {r.tick}: safe_mode={r.safe_mode}")
-    for a in r.assessments:
-        print(f"  {a.node_id}: {a.level.value}  {a.reason}")
+            tgt = d.target_dc or "-"
+            print(f"  -> {d.job_id}: {d.action.value} "
+                  f"src={d.source_dc} tgt={tgt} ({d.reason})")

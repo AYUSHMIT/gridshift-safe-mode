@@ -1,6 +1,6 @@
 # app.py
 """
-GridShift — Streamlit dashboard.
+GridShift - Streamlit dashboard.
 
 Run with:
     streamlit run app.py
@@ -21,34 +21,32 @@ orch = st.session_state.orch
 st.title("⚡ GridShift — Grid-Aware, Trust-Verified AI Orchestration")
 st.caption(
     "Attestation + behavioral consistency. "
-    "If either breaks, the system enters safe mode and refuses high-impact actions."
+    "Safe mode UNWINDS workloads off untrusted nodes; it does not freeze them."
 )
 
 # -------- Controls --------
 st.subheader("Simulation controls")
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-
+c1, c2, c3, c4 = st.columns(4)
 if c1.button("▶ Tick"):
     st.session_state.history.append(orch.tick())
-
 if c2.button("⏩ Tick x5"):
     for _ in range(5):
         st.session_state.history.append(orch.tick())
-
 if c3.button("🌡 Heatwave"):
     orch.trigger_heatwave(60)
-
 if c4.button("📦 Job burst"):
     orch.submit_job_burst(14)
 
-if c5.button("🕵 Attack: lie"):
+st.subheader("Attack scenarios")
+a1, a2, a3, a4 = st.columns(4)
+if a1.button("🕵 Lie (behavioral)"):
     orch.start_attack_lying("BOS-1", 16.0)
-
-if c6.button("🔧 Attack: tamper"):
+if a2.button("🔧 Tamper (firmware)"):
     orch.start_attack_tamper("BOS-1")
-
-c7, _ = st.columns([1, 5])
-if c7.button("🧹 Clear attacks"):
+if a3.button("💥 Load spike"):
+    # Supervisor scenario step 2: inflate real load after attestation fails
+    orch.spike_load("BOS-1", 25.0)
+if a4.button("🧹 Clear attacks"):
     orch.clear_attacks()
 
 st.divider()
@@ -66,7 +64,6 @@ else:
     m4.metric("Overload risk", f"{latest.grid.overload_risk*100:.1f}%")
     m5.metric("Safe mode", "🔴 ON" if latest.safe_mode else "🟢 OFF")
 
-    # Per-node trust table
     st.subheader("Per-node trust")
     rows = [{
         "node": a.node_id,
@@ -81,7 +78,6 @@ else:
     } for a in latest.assessments]
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
-    # Decisions this tick
     st.subheader("Decisions this tick")
     if latest.decisions:
         st.dataframe(pd.DataFrame([{
@@ -94,7 +90,6 @@ else:
     else:
         st.success("No actions needed this tick.")
 
-    # History chart
     st.subheader("Load history")
     hist = pd.DataFrame([{
         "tick": t.tick,
@@ -103,10 +98,11 @@ else:
     } for t in st.session_state.history])
     st.line_chart(hist.set_index("tick"))
 
-    # Fleet breakdown
     st.subheader("Fleet state")
     fleet_rows = []
     for dc_id, dc in orch.fleet.dcs.items():
+        util_pct = (dc.observed_load_mw() / dc.capacity_mw * 100
+                    if dc.capacity_mw else 0)
         fleet_rows.append({
             "dc": dc_id,
             "region": dc.region,
@@ -114,6 +110,8 @@ else:
             "delayed jobs": len(dc.delayed_jobs),
             "true load (MW)": round(dc.true_load_mw(), 2),
             "reported (MW)": round(dc.reported_load_mw(), 2),
+            "util %": f"{util_pct:.0f}",
             "lying": "⚠ yes" if dc.lying else "no",
+            "spike (MW)": round(dc.spike_mw, 2),
         })
     st.dataframe(pd.DataFrame(fleet_rows), width="stretch", hide_index=True)

@@ -23,9 +23,10 @@ class DataCenter:
     # Attack simulation:
     lying: bool = False
     lie_delta_mw: float = 0.0     # positive = under-reports by this much
+    spike_mw: float = 0.0         # extra real load (e.g., attacker-controlled)
 
     def true_load_mw(self) -> float:
-        return sum(j.power_mw for j in self.running_jobs)
+        return sum(j.power_mw for j in self.running_jobs) + self.spike_mw
 
     def reported_load_mw(self) -> float:
         """What the controller claims. Can lie if compromised."""
@@ -136,6 +137,18 @@ class DataCenterFleet:
     def disable_lie(self, dc_id: str):
         self.dcs[dc_id].lying = False
         self.dcs[dc_id].lie_delta_mw = 0.0
+
+    def spike(self, dc_id: str, extra_mw: float):
+        """
+        Supervisor-scenario attack helper: inject extra real power draw
+        on a DC (representing an attacker cranking up a workload they
+        control). The observed-load sensor will see this; reported_load
+        will only reflect it if the DC is not lying.
+        """
+        self.dcs[dc_id].spike_mw = extra_mw
+
+    def clear_spike(self, dc_id: str):
+        self.dcs[dc_id].spike_mw = 0.0
 
 
 if __name__ == "__main__":

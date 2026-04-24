@@ -2,18 +2,31 @@
 """
 [Owned by: System Security teammate]
 
-DecisionEngine:    picks candidate actions (delay/migrate) to bring the
-                   grid back under threshold. Priority-aware and greedy.
+DecisionEngine:    picks candidate actions to keep the grid stable.
+SafetyController:  filters those actions based on per-node trust levels.
 
-SafetyController:  filters those candidate actions based on the worst
-                   trust level observed. Under COMPROMISED trust, any
-                   high-impact action (migration) is BLOCKED.
+Refined design (after feedback from the HW security supervisor):
+  - Under COMPROMISED trust on a node, migrations *into* that node
+    are blocked, but migrations *out of* it are ALLOWED and PREFERRED.
+    This defeats the DoS-via-safe-mode attack: an adversary that
+    triggers a false attestation failure on a DC and then inflates
+    its load cannot trap those workloads in place.
+  - The grid-side observed_load_mw is always authoritative for
+    hard safety limits, independent of the reported/attested trust
+    state. If observed load on any node exceeds a local overload
+    threshold, an unwind-migration is emitted regardless.
+  - Safe mode is an INVESTIGATE-AND-UNWIND state, not a freeze.
 """
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from core.state import (
     TrustLevel, Decision, ActionType, JobPriority, GridState
 )
 from core.dc_simulator import DataCenterFleet
+
+
+# If a DC's true load exceeds this fraction of its capacity,
+# emit an unwind-migration regardless of trust state.
+LOCAL_UNWIND_UTILIZATION = 0.75
 
 
 class DecisionEngine:
@@ -46,9 +59,6 @@ class DecisionEngine:
                         target_dc=target,
                         reason="reduce Boston load via geographic shift",
                     ))
-                    # Migration reduces Boston-region load but still
-                    # consumes power elsewhere; only partial relief to
-                    # the Boston threshold.
                     projected -= job.power_mw * 0.5
                     continue
             decisions.append(Decision(
@@ -70,44 +80,115 @@ class DecisionEngine:
 
 class SafetyController:
     """
-    Filters decisions based on the worst trust level across all nodes.
-    This is the enforcement layer: under low trust, dangerous actions
-    are downgraded to BLOCK. Critical jobs are always preserved.
+    Safe mode is an INVESTIGATE-AND-UNWIND state:
+      - migrations INTO a compromised node  -> blocked
+      - migrations OUT OF a compromised node -> preferred
+      - observed-load overrides always apply (grid-side sensor is
+        authoritative for hard safety limits)
     """
+
     def apply(
         self,
         decisions: List[Decision],
-        trust_levels: List[TrustLevel],
+        trust_by_node: Dict[str, TrustLevel],
+        fleet: DataCenterFleet,
     ) -> Tuple[List[Decision], bool]:
-        worst = self._worst(trust_levels)
-        if worst == TrustLevel.TRUSTED:
-            return decisions, False
+        bad_nodes = {n for n, lvl in trust_by_node.items()
+                     if lvl != TrustLevel.TRUSTED}
+        safe_mode = len(bad_nodes) > 0
 
         filtered: List[Decision] = []
-        for d in decisions:
-            if worst == TrustLevel.COMPROMISED:
-                # Block migrations entirely; allow delays only.
-                if d.action == ActionType.MIGRATE:
-                    filtered.append(Decision(
-                        job_id=d.job_id,
-                        action=ActionType.BLOCK,
-                        source_dc=d.source_dc,
-                        reason="SAFE MODE: migration blocked under compromised trust",
-                    ))
-                else:
-                    filtered.append(d)
-            else:  # SUSPICIOUS
-                # Allow everything but stamp the reason.
-                d.reason = f"[SUSPICIOUS TRUST] {d.reason}"
-                filtered.append(d)
-        return filtered, True
 
-    def _worst(self, levels: List[TrustLevel]) -> TrustLevel:
-        order = {
-            TrustLevel.TRUSTED: 0,
-            TrustLevel.SUSPICIOUS: 1,
-            TrustLevel.COMPROMISED: 2,
-        }
-        if not levels:
-            return TrustLevel.TRUSTED
-        return max(levels, key=lambda l: order[l])
+        # 1. Filter planned decisions by directional policy
+        for d in decisions:
+            # Migration TARGET untrusted -> block (never place new
+            # work on a dubious node).
+            if d.action == ActionType.MIGRATE and d.target_dc in bad_nodes:
+                filtered.append(Decision(
+                    job_id=d.job_id,
+                    action=ActionType.BLOCK,
+                    source_dc=d.source_dc,
+                    target_dc=d.target_dc,
+                    reason=(
+                        f"SAFE MODE: refusing to migrate into "
+                        f"untrusted node {d.target_dc}"
+                    ),
+                ))
+                continue
+
+            # Migration SOURCE untrusted -> preferred (unwind)
+            if d.action == ActionType.MIGRATE and d.source_dc in bad_nodes:
+                d.reason = (
+                    f"SAFE MODE (unwind): preferred migration OUT of "
+                    f"untrusted node {d.source_dc}"
+                )
+                filtered.append(d)
+                continue
+
+            # Delays are always fine
+            if d.action == ActionType.DELAY:
+                if safe_mode:
+                    d.reason = f"[SAFE MODE] {d.reason}"
+                filtered.append(d)
+                continue
+
+            if safe_mode:
+                d.reason = f"[SAFE MODE] {d.reason}"
+            filtered.append(d)
+
+        # 2. Observed-load override: grid-side sensor is authoritative
+        unwinds = self._observed_load_unwinds(fleet, bad_nodes)
+        filtered.extend(unwinds)
+
+        return filtered, safe_mode
+
+    def _observed_load_unwinds(
+        self, fleet: DataCenterFleet, bad_nodes: set
+    ) -> List[Decision]:
+        """
+        For any DC whose observed utilization is above LOCAL_UNWIND_UTILIZATION,
+        emit an unwind-migration of its largest non-critical job to any
+        TRUSTED DC that can accept it. Fires even in safe mode and even
+        for cleanly-attesting nodes -- the grid-side sensor is trusted.
+        """
+        unwinds: List[Decision] = []
+        for src_id, dc in fleet.dcs.items():
+            if dc.capacity_mw <= 0:
+                continue
+            util = dc.observed_load_mw() / dc.capacity_mw
+            if util < LOCAL_UNWIND_UTILIZATION:
+                continue
+
+            hot_jobs = sorted(
+                [j for j in dc.running_jobs
+                 if j.priority != JobPriority.CRITICAL],
+                key=lambda j: -j.power_mw,
+            )
+            for job in hot_jobs:
+                target = None
+                for tgt_id, tgt_dc in fleet.dcs.items():
+                    if tgt_id == src_id:
+                        continue
+                    if tgt_id in bad_nodes:
+                        continue   # never migrate INTO an untrusted node
+                    if tgt_dc.can_accept(job):
+                        target = tgt_id
+                        break
+                if target is not None:
+                    tag = (
+                        "OBSERVED-LOAD OVERRIDE: "
+                        f"{src_id} utilization {util*100:.0f}% -- "
+                        f"forced unwind to {target}"
+                    )
+                    if src_id in bad_nodes:
+                        tag = f"{tag} (reduces exposure to untrusted node)"
+                    unwinds.append(Decision(
+                        job_id=job.job_id,
+                        action=ActionType.MIGRATE,
+                        source_dc=src_id,
+                        target_dc=target,
+                        reason=tag,
+                    ))
+                    # one unwind per DC per tick
+                    break
+        return unwinds
