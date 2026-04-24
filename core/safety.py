@@ -57,7 +57,10 @@ class DecisionEngine:
                         action=ActionType.MIGRATE,
                         source_dc=src_dc,
                         target_dc=target,
-                        reason="reduce Boston load via geographic shift",
+                        reason=(
+                            f"GRID: reduce Boston load below "
+                            f"{grid.threshold_mw:.0f} MW via geographic shift"
+                        ),
                     ))
                     projected -= job.power_mw * 0.5
                     continue
@@ -65,7 +68,10 @@ class DecisionEngine:
                 job_id=job.job_id,
                 action=ActionType.DELAY,
                 source_dc=src_dc,
-                reason="delay to relieve grid stress",
+                reason=(
+                    f"GRID: delay non-critical job to bring load below "
+                    f"{grid.threshold_mw:.0f} MW"
+                ),
             ))
             projected -= job.power_mw
         return decisions
@@ -176,12 +182,12 @@ class SafetyController:
                         break
                 if target is not None:
                     tag = (
-                        "OBSERVED-LOAD OVERRIDE: "
-                        f"{src_id} utilization {util*100:.0f}% -- "
-                        f"forced unwind to {target}"
+                        f"UNWIND: {src_id} observed utilization "
+                        f"{util*100:.0f}% exceeds 75% safety limit "
+                        f"-> migrate to {target}"
                     )
                     if src_id in bad_nodes:
-                        tag = f"{tag} (reduces exposure to untrusted node)"
+                        tag = f"{tag} ({src_id} also untrusted; reduces exposure)"
                     unwinds.append(Decision(
                         job_id=job.job_id,
                         action=ActionType.MIGRATE,

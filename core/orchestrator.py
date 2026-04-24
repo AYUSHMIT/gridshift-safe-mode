@@ -102,6 +102,10 @@ class GridShiftOrchestrator:
         """Behavioral attack: controller lies about its load."""
         self.fleet.enable_lie(dc_id, delta)
 
+    def stop_attack_lying(self, dc_id: str = "BOS-1"):
+        """Stop just the lying attack on a node, leaving other attacks alone."""
+        self.fleet.disable_lie(dc_id)
+
     def start_attack_tamper(self, dc_id: str = "BOS-1"):
         """Firmware attack: PCR no longer matches known-good."""
         self.provers[dc_id].tamper_firmware()
