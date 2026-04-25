@@ -43,6 +43,21 @@ class Prover:
         self._firmware = GOOD_FIRMWARE
         self._pcr = compute_pcr(self._firmware)
 
+    def firmware_matches_known_good(self) -> bool:
+        """
+        Public self-check: does this prover's currently-loaded firmware
+        match the known-good baseline? This is the single source of truth
+        for "is this device tampered" -- callers should use this rather
+        than reading the internal PCR directly.
+
+        Note: this is a self-attestation check. In a hostile environment
+        a compromised prover could lie about this; the orchestrator's
+        verifier is what actually enforces trust. This method exists so
+        the UI / monitoring code can describe device state without
+        needing to re-implement PCR comparison.
+        """
+        return self._pcr == compute_pcr(GOOD_FIRMWARE)
+
     def attest(self, nonce: str) -> TelemetryPacket:
         reported = self._load_source()
         ts = time.time()

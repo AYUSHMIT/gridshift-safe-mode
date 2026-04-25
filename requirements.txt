@@ -1,3 +1,8 @@
 streamlit>=1.36.0
 cryptography>=43.0.0
 pandas>=2.2.0
+altair>=5.0.0
+# Optional - AI narrator (either one works; both are optional,
+# fallback is rule-based if neither is installed/configured)
+anthropic>=0.40.0
+openai>=1.50.0
