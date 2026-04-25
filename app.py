@@ -94,7 +94,8 @@ if sc3.button("🏆 Load winning scenario"):
     o = fresh_orchestrator()
     o.trigger_heatwave(60)
     o.submit_job_burst(14)
-    o.tick(); o.tick()
+    o.tick()
+    o.tick()
     o.start_attack_tamper("BOS-1")
     o.spike_load("BOS-1", 25.0)
     h = [o.tick(), o.tick()]
