@@ -154,11 +154,11 @@ def detect_active_attacks(orch):
             items.append((dc_id, f"behavioral lie (under-reports by {dc.lie_delta_mw:.0f} MW)"))
         if dc.spike_mw > 0:
             items.append((dc_id, f"real load spike (+{dc.spike_mw:.0f} MW)"))
-    # Tamper detection: compare prover PCR to known-good
+    # Tamper detection: ask each prover whether its own firmware still
+    # matches the known-good baseline. Keeps the UI free of attestation
+    # internals -- the prover owns its own self-check.
     for dc_id, prover in orch.provers.items():
-        from core.attestation import compute_pcr
-        from core.prover import GOOD_FIRMWARE
-        if compute_pcr(GOOD_FIRMWARE) != prover._pcr:
+        if not prover.firmware_matches_known_good():
             items.append((dc_id, "firmware tampered (PCR mismatch)"))
     return items
 
