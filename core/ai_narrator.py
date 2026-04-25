@@ -45,6 +45,11 @@ class Briefing:
     model: Optional[str] = None
 
 
+# Briefings are short (3-5 sentences). Cap output tokens so a stuck or
+# verbose model can't run away with cost or latency.
+BRIEFING_MAX_TOKENS = 300
+
+
 # --------------------------------------------------------------------------
 # The system prompt for the LLM. Keep this tight -- it's the contract
 # between our code and the model.
@@ -68,29 +73,50 @@ text only.
 
 
 def _build_user_payload(tick: TickResult) -> str:
-    """Serialize the tick state into a compact JSON payload for the LLM."""
+    """
+    Serialize the tick state into a compact JSON payload for the LLM.
+
+    We keep all nodes (the LLM still needs to write briefings on clean
+    ticks too), but drop redundant/tautological fields:
+      - For TRUSTED nodes, omit the per-check booleans (sig/pcr/nonce
+        all == True is implied by trust=="trusted"). Keep them on
+        non-trusted nodes so the LLM can name the specific failure.
+      - Skip mismatch_mw when it is zero.
+      - Drop target on non-migrate decisions.
+      - One timestamp, not two.
+      - No JSON indentation -- the model does not benefit from
+        whitespace tokens.
+    """
     assessments = []
     for a in tick.assessments:
-        assessments.append({
+        item = {
             "node": a.node_id,
             "trust": a.level.value,
-            "signature_ok": a.verification.signature_ok,
-            "pcr_ok": a.verification.pcr_ok,
-            "nonce_ok": a.verification.nonce_ok,
             "reported_mw": round(a.reported_load_mw, 2),
             "observed_mw": round(a.observed_load_mw, 2),
-            "mismatch_mw": round(a.mismatch_mw, 2),
             "reason": a.reason,
-        })
+        }
+        if a.mismatch_mw > 0:
+            item["mismatch_mw"] = round(a.mismatch_mw, 2)
+        # Per-check booleans are only informative when something failed.
+        if a.level.value != "trusted":
+            item["sig_ok"] = a.verification.signature_ok
+            item["pcr_ok"] = a.verification.pcr_ok
+            item["nonce_ok"] = a.verification.nonce_ok
+        assessments.append(item)
+
     decisions = []
     for d in tick.decisions:
-        decisions.append({
+        item = {
             "job": d.job_id,
             "action": d.action.value,
             "source": d.source_dc,
-            "target": d.target_dc,
             "reason": d.reason,
-        })
+        }
+        if d.target_dc:
+            item["target"] = d.target_dc
+        decisions.append(item)
+
     payload = {
         "tick": tick.tick,
         "timestamp_utc": time.strftime(
@@ -102,18 +128,70 @@ def _build_user_payload(tick: TickResult) -> str:
             "overload_risk_pct": round(tick.grid.overload_risk * 100, 1),
         },
         "safe_mode": tick.safe_mode,
-        "per_node_assessments": assessments,
-        "decisions_this_tick": decisions,
+        "nodes": assessments,
+        "decisions": decisions,
     }
     return (
         "Produce an operator briefing for the following GridShift tick. "
-        "Tick state (JSON):\n\n" + json.dumps(payload, indent=2)
+        "Tick state (JSON): " + json.dumps(payload, separators=(",", ":"))
     )
 
 
 # --------------------------------------------------------------------------
 # Provider adapters
 # --------------------------------------------------------------------------
+
+def _extract_anthropic_text(resp) -> Optional[str]:
+    """
+    Pull text out of an Anthropic Messages API response. Skips non-text
+    blocks (thinking, tool_use, etc.). Returns None if nothing usable.
+    """
+    try:
+        blocks = resp.content
+    except AttributeError:
+        return None
+    if not blocks:
+        return None
+    parts = [getattr(b, "text", None) for b in blocks
+             if getattr(b, "type", None) == "text"]
+    text = "\n".join(p for p in parts if p).strip()
+    return text or None
+
+
+def _extract_openai_text(message) -> Optional[str]:
+    """
+    Pull text out of an OpenAI ChatCompletion message. The .content
+    field can be:
+      - a plain string (regular text models)
+      - a list of content parts (vision / multimodal models)
+      - None (when the model returned tool calls only)
+    Returns None on any of these failure modes so the caller falls
+    through to the next provider or the rule-based fallback.
+    """
+    content = getattr(message, "content", None)
+    if content is None:
+        return None
+    if isinstance(content, str):
+        return content.strip() or None
+    if isinstance(content, list):
+        # Each part may be a dict-like object or pydantic model.
+        # We accept any "text" field present on parts of type "text".
+        parts = []
+        for part in content:
+            ptype = getattr(part, "type", None)
+            if ptype is None and isinstance(part, dict):
+                ptype = part.get("type")
+            if ptype != "text":
+                continue
+            ptext = getattr(part, "text", None)
+            if ptext is None and isinstance(part, dict):
+                ptext = part.get("text")
+            if ptext:
+                parts.append(ptext)
+        text = "\n".join(parts).strip()
+        return text or None
+    return None
+
 
 def _call_anthropic(user_msg: str, timeout_s: float = 8.0) -> Optional[Briefing]:
     """Try Anthropic Claude. Returns None on any failure."""
@@ -131,12 +209,11 @@ def _call_anthropic(user_msg: str, timeout_s: float = 8.0) -> Optional[Briefing]
     try:
         resp = client.messages.create(
             model=model,
-            max_tokens=300,
+            max_tokens=BRIEFING_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
         )
-        text_parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
-        text = "\n".join(text_parts).strip()
+        text = _extract_anthropic_text(resp)
         if not text:
             return None
         return Briefing(
@@ -165,17 +242,19 @@ def _call_openai(user_msg: str, timeout_s: float = 8.0) -> Optional[Briefing]:
     try:
         resp = client.chat.completions.create(
             model=model,
-            max_tokens=300,
+            max_tokens=BRIEFING_MAX_TOKENS,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
         )
-        text = resp.choices[0].message.content
+        if not getattr(resp, "choices", None):
+            return None
+        text = _extract_openai_text(resp.choices[0].message)
         if not text:
             return None
         return Briefing(
-            text=text.strip(),
+            text=text,
             source="openai",
             latency_ms=int((time.time() - t0) * 1000),
             model=model,
