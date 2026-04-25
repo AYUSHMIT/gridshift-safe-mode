@@ -68,6 +68,38 @@ def build_fleet_df(orch) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def detect_active_attacks(orch) -> list:
+    """
+    Inspect orchestrator state and return a list of (node_id, description)
+    tuples for every active attack. Pure function -- no Streamlit calls.
+
+    The "active attack" set is the union of three independent sensors:
+      - DC.lying flag                  (behavioral attack injected via UI)
+      - DC.spike_mw > 0                (load-spike attack injected via UI)
+      - Prover firmware self-check     (firmware tamper attack)
+
+    Asks each prover whether its own firmware still matches the known-good
+    baseline rather than reaching into PCR internals; the prover owns
+    that comparison.
+    """
+    items = []
+    for dc_id, dc in orch.fleet.dcs.items():
+        if dc.lying:
+            items.append((
+                dc_id,
+                f"behavioral lie (under-reports by {dc.lie_delta_mw:.0f} MW)",
+            ))
+        if dc.spike_mw > 0:
+            items.append((
+                dc_id,
+                f"real load spike (+{dc.spike_mw:.0f} MW)",
+            ))
+    for dc_id, prover in orch.provers.items():
+        if not prover.firmware_matches_known_good():
+            items.append((dc_id, "firmware tampered (PCR mismatch)"))
+    return items
+
+
 # --------------------------------------------------------------------------
 # Altair chart
 # --------------------------------------------------------------------------

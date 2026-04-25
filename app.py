@@ -15,6 +15,7 @@ from core.ui_helpers import (
     build_decisions_df,
     build_fleet_df,
     build_load_history_chart,
+    detect_active_attacks,
     get_briefing,
     briefing_source_badge,
 )
@@ -153,23 +154,6 @@ bos1 = next((a for a in latest.assessments if a.node_id == "BOS-1"), None)
 
 
 # ---------- Active attack panel (suggestion #5) ----------
-
-def detect_active_attacks(orch):
-    """Inspect orchestrator state to describe what attacks are live."""
-    items = []
-    for dc_id, dc in orch.fleet.dcs.items():
-        if dc.lying:
-            items.append((dc_id, f"behavioral lie (under-reports by {dc.lie_delta_mw:.0f} MW)"))
-        if dc.spike_mw > 0:
-            items.append((dc_id, f"real load spike (+{dc.spike_mw:.0f} MW)"))
-    # Tamper detection: ask each prover whether its own firmware still
-    # matches the known-good baseline. Keeps the UI free of attestation
-    # internals -- the prover owns its own self-check.
-    for dc_id, prover in orch.provers.items():
-        if not prover.firmware_matches_known_good():
-            items.append((dc_id, "firmware tampered (PCR mismatch)"))
-    return items
-
 
 active_attacks = detect_active_attacks(orch)
 if active_attacks:
