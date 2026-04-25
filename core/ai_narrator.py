@@ -30,11 +30,15 @@ Usage:
 """
 from __future__ import annotations
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
 from typing import Optional, List
 from core.state import TickResult, TrustAssessment, TrustLevel
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -222,7 +226,15 @@ def _call_anthropic(user_msg: str, timeout_s: float = 8.0) -> Optional[Briefing]
             latency_ms=int((time.time() - t0) * 1000),
             model=model,
         )
-    except Exception:
+    except Exception as exc:
+        # Best-effort path: any failure (rate limit, auth, network,
+        # SDK shape change, ...) falls through to the next provider.
+        # Log so the failure is traceable when debugging, but do not
+        # raise -- the caller's contract is "return Briefing or None".
+        log.warning(
+            "Anthropic narrator call failed (model=%s): %s: %s",
+            model, type(exc).__name__, exc,
+        )
         return None
 
 
@@ -259,7 +271,11 @@ def _call_openai(user_msg: str, timeout_s: float = 8.0) -> Optional[Briefing]:
             latency_ms=int((time.time() - t0) * 1000),
             model=model,
         )
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "OpenAI narrator call failed (model=%s): %s: %s",
+            model, type(exc).__name__, exc,
+        )
         return None
 
 
