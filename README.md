@@ -1,10 +1,10 @@
-# GridShift — Safe-Mode Orchestration for Grid-Aware AI Workloads
+# GridShift Safe-Mode Orchestration for Grid-Aware AI Workloads
 
 A grid-aware AI orchestrator that refuses to act on telemetry it cannot trust.
 
 ## The idea in one line
 
-Every data-center controller **cryptographically attests** to its own integrity and **signs** every telemetry packet. The orchestrator cross-checks two independent signals — cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** — which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
+Every data-center controller **cryptographically attests** to its own integrity and **signs** every telemetry packet. The orchestrator cross-checks two independent signals cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
 
 ## Where the AI lives
 
@@ -14,9 +14,9 @@ GridShift's AI component is honest about what it does and does not do:
 - **The AI generates operator briefings.** After each tick, the structured trust state and decision list are passed to an LLM (Claude or GPT, configurable) which produces a 3–5 sentence operator-log-style briefing: what happened, what GridShift did, and what the operator should inspect.
 - **The AI falls back cleanly offline.** If no API key is configured or the network is down, a rule-based fallback generates an operator briefing deterministically. The demo works with or without Wi-Fi.
 
-This separation — *AI for explanation, not decision* — is itself part of the pitch. It's the right architectural pattern for AI in critical infrastructure.
+This separation *AI for explanation, not decision* is itself part of the pitch. It's the right architectural pattern for AI in critical infrastructure.
 
-## Design refinement — supervisor feedback (April 2026)
+## Design refinement supervisor feedback (April 2026)
 
 An early version of the design blocked *all* migrations involving an untrusted node. A hardware-security supervisor pointed out this could be weaponized: an adversary with a workload on a DC could trigger a false attestation failure, and then inflate the load on that DC, using the migration block to trap their own inflated workload in place and create a DoS against the grid. The refined design below addresses this directly.
 
@@ -69,23 +69,23 @@ python -m core.verifier
 
 The dashboard now has a **🎬 Guided demo** with a single `▶ Next demo step` button that walks through five steps, plus a `🏆 Load winning scenario` shortcut for time-pressured demos. Manual controls are tucked into an expander.
 
-1. **Step 1 — Heatwave begins.** Baseline grid load rises.
-2. **Step 2 — AI job burst.** A wave of AI jobs lands across the three DCs.
-3. **Step 3 — Behavioral lie.** BOS-1 under-reports by 16 MW. Behavioral monitor catches the mismatch; trust flips to compromised; safe mode ON.
-4. **Step 4 — Firmware tamper.** PCR no longer matches known-good. Attestation catches it even when reported and observed agree.
-5. **Step 5 — Load spike + unwind (the winning moment).** BOS-1 is untrusted AND its real load is inflated. The refined safety layer **migrates jobs OFF BOS-1** instead of freezing them — the supervisor-scenario DoS is defeated.
+1. **Step 1 Heatwave begins.** Baseline grid load rises.
+2. **Step 2 AI job burst.** A wave of AI jobs lands across the three DCs.
+3. **Step 3 Behavioral lie.** BOS-1 under-reports by 16 MW. Behavioral monitor catches the mismatch; trust flips to compromised; safe mode ON.
+4. **Step 4 Firmware tamper.** PCR no longer matches known-good. Attestation catches it even when reported and observed agree.
+5. **Step 5 Load spike + unwind (the winning moment).** BOS-1 is untrusted AND its real load is inflated. The refined safety layer **migrates jobs OFF BOS-1** instead of freezing them the supervisor-scenario DoS is defeated.
 
 ### UI features for judges
 
-- **Active attack panel** — narrates exactly what is being injected at each moment.
-- **Reported vs Observed metrics** — the heart of the story shown as a 4-up metric row.
-- **Load history chart** — the 900 MW threshold is a bold red dashed line; safe-mode periods are shaded.
-- **Trust legend** — explains what `sig`, `pcr`, `nonce`, and mismatch mean.
-- **"Why this happened" box** — plain-English narration of every decision.
-- **Directional safe mode** — explicit "Blocked: INTO BOS-1 / Allowed: OUT OF BOS-1" panel.
-- **Naive vs GridShift comparison table** — shows the value of the directional unwind in one glance.
-- **Reset full demo** and **Load winning scenario** buttons — recovery if the demo goes sideways.
-- **Takeaway banner** — *GridShift optimizes when trust holds, and safely unwinds when trust breaks.*
+- **Active attack panel** narrates exactly what is being injected at each moment.
+- **Reported vs Observed metrics** the heart of the story shown as a 4-up metric row.
+- **Load history chart** the 900 MW threshold is a bold red dashed line; safe-mode periods are shaded.
+- **Trust legend** explains what `sig`, `pcr`, `nonce`, and mismatch mean.
+- **"Why this happened" box** plain-English narration of every decision.
+- **Directional safe mode** explicit "Blocked: INTO BOS-1 / Allowed: OUT OF BOS-1" panel.
+- **Naive vs GridShift comparison table** shows the value of the directional unwind in one glance.
+- **Reset full demo** and **Load winning scenario** buttons recovery if the demo goes sideways.
+- **Takeaway banner** *GridShift optimizes when trust holds, and safely unwinds when trust breaks.*
 
 ## Core invariants (refined)
 
@@ -127,4 +127,4 @@ gridshift/
 | Firmware tampered                                       | may pass         | ✔ caught          | block-into; unwind-out |
 | Replay of a captured valid message                      | may pass         | ✔ caught (nonce)  | block-into; unwind-out |
 | Stolen / spoofed controller identity                    | may pass         | ✔ caught (sig)    | block-into; unwind-out |
-| **DoS via safe-mode weaponization** (supervisor scenario) | —              | attacker wants this | ✔ **defeated** — unwind + observed-load override |
+| **DoS via safe-mode weaponization** (supervisor scenario) |              | attacker wants this | ✔ **defeated** unwind + observed-load override |
