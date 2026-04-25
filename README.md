@@ -1,4 +1,4 @@
-# GridShift Safe-Mode Orchestration for Grid-Aware AI Workloads
+# GridShift: Safe-Mode Orchestration for Grid-Aware AI Workloads
 
 A grid-aware AI orchestrator that refuses to act on telemetry it cannot trust.
 
