@@ -7,10 +7,17 @@ Run with:
 """
 import streamlit as st
 import pandas as pd
-import altair as alt
 from core.orchestrator import GridShiftOrchestrator
 from core.state import TrustLevel
 from core.ai_narrator import IncidentNarrator
+from core.ui_helpers import (
+    build_trust_df,
+    build_decisions_df,
+    build_fleet_df,
+    build_load_history_chart,
+    get_briefing,
+    briefing_source_badge,
+)
 
 
 # ---------- Setup ----------
@@ -203,54 +210,10 @@ if bos1 is not None:
 # ---------- Load history with bold threshold line (suggestion: visually scream) ----------
 
 st.subheader("📈 Load history")
-hist_df = pd.DataFrame([{
-    "tick": t.tick,
-    "total_mw": t.grid.total_load_mw,
-    "threshold": t.grid.threshold_mw,
-    "safe_mode": t.safe_mode,
-} for t in st.session_state.history])
-
-base = alt.Chart(hist_df).encode(x=alt.X("tick:Q", title="Tick"))
-
-load_line = base.mark_line(strokeWidth=3, color="#1f77b4").encode(
-    y=alt.Y("total_mw:Q", title="Total Boston grid load (MW)",
-            scale=alt.Scale(zero=False)),
-    tooltip=["tick", "total_mw", "threshold", "safe_mode"],
+st.altair_chart(
+    build_load_history_chart(st.session_state.history),
+    use_container_width=True,
 )
-
-threshold_line = base.mark_rule(strokeWidth=3, color="red", strokeDash=[6, 4]).encode(
-    y="threshold:Q",
-)
-threshold_label = base.mark_text(
-    align="right", baseline="bottom", dx=-5, dy=-3,
-    color="red", fontWeight="bold", fontSize=12,
-).encode(
-    x=alt.X("tick:Q", aggregate="max"),
-    y=alt.Y("threshold:Q", aggregate="max"),
-    text=alt.value("⚠ 900 MW safety threshold"),
-)
-
-# Highlight bands where safe mode is ON
-safe_band = base.mark_rect(opacity=0.12, color="red").encode(
-    x="tick:Q",
-    x2=alt.X2(shorthand="tick:Q"),  # placeholder, overridden below
-)
-
-# Build a ribbon dataframe for safe-mode shading
-ribbon_rows = []
-for t in st.session_state.history:
-    if t.safe_mode:
-        ribbon_rows.append({"tick_start": t.tick - 0.5, "tick_end": t.tick + 0.5})
-if ribbon_rows:
-    ribbon_df = pd.DataFrame(ribbon_rows)
-    ribbon_chart = alt.Chart(ribbon_df).mark_rect(opacity=0.10, color="red").encode(
-        x="tick_start:Q", x2="tick_end:Q",
-    )
-    chart = (ribbon_chart + load_line + threshold_line + threshold_label).properties(height=320)
-else:
-    chart = (load_line + threshold_line + threshold_label).properties(height=320)
-
-st.altair_chart(chart, use_container_width=True)
 st.caption(
     "🔵 Total Boston grid load   "
     "🟥 dashed line = 900 MW safety threshold   "
@@ -277,30 +240,14 @@ with st.expander("ℹ️ How to read the trust columns"):
 # ---------- Per-node trust table (suggestion #8: keep only what matters) ----------
 
 st.subheader("🔐 Per-node trust")
-rows = [{
-    "node": a.node_id,
-    "trust": a.level.value,
-    "sig": "✔" if a.verification.signature_ok else "✘",
-    "pcr": "✔" if a.verification.pcr_ok else "✘",
-    "nonce": "✔" if a.verification.nonce_ok else "✘",
-    "reported (MW)": round(a.reported_load_mw, 2),
-    "observed (MW)": round(a.observed_load_mw, 2),
-    "mismatch (MW)": round(a.mismatch_mw, 2),
-} for a in latest.assessments]
-st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+st.dataframe(build_trust_df(latest), width="stretch", hide_index=True)
 
 
 # ---------- Decisions table (suggestion #8) ----------
 
 st.subheader("🧭 Decisions this tick")
 if latest.decisions:
-    st.dataframe(pd.DataFrame([{
-        "job": d.job_id,
-        "action": d.action.value,
-        "source": d.source_dc,
-        "target": d.target_dc or "-",
-        "reason": d.reason,
-    } for d in latest.decisions]), width="stretch", hide_index=True)
+    st.dataframe(build_decisions_df(latest), width="stretch", hide_index=True)
 else:
     if latest.safe_mode:
         st.warning(
@@ -387,25 +334,12 @@ with ai_c2:
     )
     regenerate = st.button("🔄 Regenerate briefing")
 
-# Produce (or reuse) a briefing for this tick
-cache_key = (latest.tick, st.session_state.use_ai)
-if regenerate or cache_key not in st.session_state.briefings:
-    narrator = IncidentNarrator(prefer_llm=st.session_state.use_ai)
-    with st.spinner("Generating operator briefing..."):
-        briefing = narrator.narrate(latest)
-    st.session_state.briefings[cache_key] = briefing
-
-briefing = st.session_state.briefings[cache_key]
+briefing = get_briefing(latest, st.session_state.use_ai, regenerate)
 
 with ai_c1:
-    if briefing.source == "anthropic":
-        badge = f"🟣 Anthropic `{briefing.model}`"
-    elif briefing.source == "openai":
-        badge = f"🟢 OpenAI `{briefing.model}`"
-    else:
-        badge = "⚙️ rule-based fallback (offline)"
-    st.caption(f"Source: {badge}  •  {briefing.latency_ms} ms")
-
+    st.caption(
+        f"Source: {briefing_source_badge(briefing)}  •  {briefing.latency_ms} ms"
+    )
     # Render the briefing in a styled "operator log" box
     st.markdown(
         "<div style='padding:14px 18px; background:#F8F9FA; "
@@ -445,22 +379,7 @@ with st.expander("🆚 Naive safe mode vs GridShift directional unwind"):
 # ---------- Fleet state ----------
 
 st.subheader("🏢 Fleet state")
-fleet_rows = []
-for dc_id, dc in orch.fleet.dcs.items():
-    util_pct = (dc.observed_load_mw() / dc.capacity_mw * 100
-                if dc.capacity_mw else 0)
-    fleet_rows.append({
-        "dc": dc_id,
-        "region": dc.region,
-        "running jobs": len(dc.running_jobs),
-        "delayed jobs": len(dc.delayed_jobs),
-        "true load (MW)": round(dc.true_load_mw(), 2),
-        "reported (MW)": round(dc.reported_load_mw(), 2),
-        "util %": f"{util_pct:.0f}",
-        "lying": "⚠ yes" if dc.lying else "no",
-        "spike (MW)": round(dc.spike_mw, 2),
-    })
-st.dataframe(pd.DataFrame(fleet_rows), width="stretch", hide_index=True)
+st.dataframe(build_fleet_df(orch), width="stretch", hide_index=True)
 
 
 # ---------- Final takeaway (suggestion #10) ----------
