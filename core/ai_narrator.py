@@ -265,7 +265,7 @@ class IncidentNarrator:
     Briefing.source field records it for display.
 
     Set GRIDSHIFT_FORCE_FALLBACK=1 in the environment to always use the
-    rule-based path (useful for venue demos without wifi).
+    rule-based path (useful for venue demos without Wi-Fi).
     """
 
     def __init__(self, prefer_llm: bool = True):

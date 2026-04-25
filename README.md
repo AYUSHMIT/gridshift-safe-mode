@@ -12,7 +12,7 @@ GridShift's AI component is honest about what it does and does not do:
 
 - **The AI does not make control decisions.** All decisions (run / delay / migrate / block) are made by a deterministic safety layer. Putting an LLM in the control loop of a power grid would be reckless; we don't do that.
 - **The AI generates operator briefings.** After each tick, the structured trust state and decision list are passed to an LLM (Claude or GPT, configurable) which produces a 3–5 sentence operator-log-style briefing: what happened, what GridShift did, and what the operator should inspect.
-- **The AI falls back cleanly offline.** If no API key is configured or the network is down, a rule-based fallback generates an operator briefing deterministically. The demo works with or without wifi.
+- **The AI falls back cleanly offline.** If no API key is configured or the network is down, a rule-based fallback generates an operator briefing deterministically. The demo works with or without Wi-Fi.
 
 This separation — *AI for explanation, not decision* — is itself part of the pitch. It's the right architectural pattern for AI in critical infrastructure.
 
@@ -47,7 +47,7 @@ export OPENAI_API_KEY=sk-...
 streamlit run app.py
 ```
 
-See `.env.example` for configurable model IDs. At a venue with unreliable wifi, force offline mode with `export GRIDSHIFT_FORCE_FALLBACK=1`.
+See `.env.example` for configurable model IDs. At a venue with unreliable Wi-Fi, force offline mode with `export GRIDSHIFT_FORCE_FALLBACK=1`.
 
 ## Running the core loop without the UI
 
