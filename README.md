@@ -1,10 +1,35 @@
 # GridShift: Safe-Mode Orchestration for Grid-Aware AI Workloads
 
 A grid-aware AI orchestrator that refuses to act on telemetry it cannot trust.
+## SCSP Hackathon Submission
+
+**Team name:** Zama  
+**Track:** Electric Grid Optimization  
+**Repository:** https://github.com/AYUSHMIT/gridshift-safe-mode
+
+### Team members
+
+- Ayush Pandey
+- Arash Rezaee
+- Zahra Sharifi Soltani
+- Mehran Sasaninia
+
+### What we built
+
+GridShift is a grid-aware AI workload orchestrator for AI/data-center demand under grid stress. It verifies whether telemetry can be trusted before acting. When a controller lies, firmware attestation fails, or reported load diverges from observed load, GridShift enters safe mode and unwinds workloads off the untrusted node instead of freezing them in place.
+
+### Datasets / APIs used
+
+- Simulated Boston-area grid load model
+- Simulated AI/data-center workload traces
+- Simulated controller attestation fields: signature, PCR status, nonce freshness
+- Simulated reported-vs-observed load mismatch
+- Optional Anthropic API or OpenAI API for operator briefings
+- Deterministic offline narrator fallback when no API key is configured
 
 ## The idea in one line
 
-Every data-center controller **cryptographically attests** to its own integrity and **signs** every telemetry packet. The orchestrator cross-checks two independent signals cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
+In this prototype, every simulated data-center controller emits attestation-style fields and signed-style telemetry.. The orchestrator cross-checks two independent signals cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
 
 ## Where the AI lives
 
