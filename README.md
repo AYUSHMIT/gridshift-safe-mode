@@ -61,6 +61,8 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+> **Important:** launch with `streamlit run app.py`, **not** `python app.py`. The latter runs the script in "bare mode" — Streamlit's UI functions become no-ops, nothing renders, and you'll see `missing ScriptRunContext!` warnings in the terminal. After running the correct command, open the printed `Local URL` (typically `http://localhost:8501`) in a browser.
+
 ### Optional: enable the LLM narrator
 
 Without an API key, the AI panel runs a deterministic rule-based fallback. To use an actual LLM:

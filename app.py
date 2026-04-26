@@ -30,14 +30,16 @@ def fresh_orchestrator():
     return GridShiftOrchestrator()
 
 
-if "orch" not in st.session_state:
-    st.session_state.orch = fresh_orchestrator()
-    st.session_state.history = []
-    st.session_state.demo_step = 0
-    st.session_state.last_step_label = "(not started)"
-    st.session_state.narrator = IncidentNarrator()
-    st.session_state.briefings = {}  # tick_num -> Briefing
-    st.session_state.use_ai = True
+# Per-key idempotent init. Using setdefault so hot-reload during
+# development (or any partial state) cannot leave keys missing or
+# inconsistent. Each key checked independently.
+st.session_state.setdefault("orch", fresh_orchestrator())
+st.session_state.setdefault("history", [])
+st.session_state.setdefault("demo_step", 0)
+st.session_state.setdefault("last_step_label", "(not started)")
+st.session_state.setdefault("narrator", IncidentNarrator())
+st.session_state.setdefault("briefings", {})    # (tick_num, use_ai) -> Briefing
+st.session_state.setdefault("use_ai", True)
 
 orch = st.session_state.orch
 
@@ -104,14 +106,18 @@ if sc3.button("🏆 Load winning scenario"):
     st.session_state.history = h
     st.session_state.demo_step = len(DEMO_STEPS)
     st.session_state.last_step_label = "🏆 Winning scenario (Scene 4)"
-    orch = o
+    # Clear cached briefings: tick numbers from the new orchestrator
+    # collide with cached entries from the old one.
+    st.session_state.briefings = {}
+    st.rerun()
 
 if sc4.button("🔄 Reset full demo"):
     st.session_state.orch = fresh_orchestrator()
     st.session_state.history = []
     st.session_state.demo_step = 0
     st.session_state.last_step_label = "(not started)"
-    orch = st.session_state.orch
+    st.session_state.briefings = {}
+    st.rerun()
 
 # Show next-step hint
 if st.session_state.demo_step < len(DEMO_STEPS):
@@ -144,12 +150,21 @@ with st.expander("Manual controls (advanced)"):
 
 st.divider()
 
-# ---------- If no history yet, show a primer and stop ----------
-if not st.session_state.history:
+# ---------- Robust history access ----------
+# Belt-and-braces: even if some race or hot-reload leaves history
+# in an unexpected state, we never crash on the [-1] access.
+history = st.session_state.get("history") or []
+if not isinstance(history, list):
+    history = []
+
+if len(history) == 0:
     st.info("Click **▶ Next demo step** to begin the guided demo.")
     st.stop()
+    # Defensive: if for any reason st.stop() did not halt execution
+    # (e.g. an unusual runtime), short-circuit before [-1] crashes.
+    raise SystemExit  # pragma: no cover
 
-latest = st.session_state.history[-1]
+latest = history[-1]
 bos1 = next((a for a in latest.assessments if a.node_id == "BOS-1"), None)
 
 
@@ -196,7 +211,7 @@ if bos1 is not None:
 
 st.subheader("📈 Load history")
 st.altair_chart(
-    build_load_history_chart(st.session_state.history),
+    build_load_history_chart(history),
     use_container_width=True,
 )
 st.caption(
