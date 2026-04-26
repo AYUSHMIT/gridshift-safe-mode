@@ -29,7 +29,7 @@ GridShift is a grid-aware AI workload orchestrator for AI/data-center demand und
 
 ## The idea in one line
 
-In this prototype, every simulated data-center controller emits attestation-style fields and signed-style telemetry.. The orchestrator cross-checks two independent signals cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
+In this prototype, every simulated data-center controller emits attestation-style fields and signed-style telemetry. The orchestrator cross-checks two independent signals: cryptographic attestation and behavioral consistency. The orchestrator cross-checks two independent signals cryptographic attestation *and* behavioral consistency (reported vs. observed load). If either fails, the system enters **safe mode** which UNWINDS workloads off the untrusted node rather than freezing them in place. An **LLM-powered incident narrator** turns each tick's structured state into a plain-language operator briefing.
 
 ## Where the AI lives
 
@@ -41,7 +41,7 @@ GridShift's AI component is honest about what it does and does not do:
 
 This separation *AI for explanation, not decision* is itself part of the pitch. It's the right architectural pattern for AI in critical infrastructure.
 
-## Design refinement supervisor feedback (April 2026)
+## Why safe mode unwinds instead of freezes
 
 An early version of the design blocked *all* migrations involving an untrusted node. A hardware-security supervisor pointed out this could be weaponized: an adversary with a workload on a DC could trigger a false attestation failure, and then inflate the load on that DC, using the migration block to trap their own inflated workload in place and create a DoS against the grid. The refined design below addresses this directly.
 
