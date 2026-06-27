@@ -50,6 +50,8 @@ class SimConfig:
     spike_mw: float = 0.0                   # injected real load (DoS step)
     firmware_tamper: bool = False           # PCR mismatch attack (Zahra)
     replay_nonce: bool = False              # stale-nonce attack (Zahra)
+    key_compromise: bool = False            # stolen signing key attack (Zahra)
+    detector_mode: str = "fusion"           # "attestation-only" | "behavior-only" | "fusion"
 
     # ---- run control (harness / Ayush) ----
     n_ticks: int = 200
