@@ -41,11 +41,16 @@ class GridShiftOrchestrator:
         for dc_id, dc in self.fleet.dcs.items():
             priv, pub = generate_keypair()
             self.verifier.register(dc_id, pub)
-            self.provers[dc_id] = Prover(
+            prover = Prover(
                 node_id=dc_id,
                 signing_key=priv,
                 load_source=(lambda d=dc: d.reported_load_mw()),
+                replay_nonce=self.cfg.replay_nonce,
+                key_compromise=self.cfg.key_compromise,
             )
+            if self.cfg.firmware_tamper:
+                prover.tamper_firmware()
+            self.provers[dc_id] = prover
 
     def tick(self) -> TickResult:
         self.tick_num += 1
@@ -121,10 +126,28 @@ class GridShiftOrchestrator:
         """
         self.fleet.spike(dc_id, extra_mw)
 
+    def start_attack_replay(self, dc_id: str = "BOS-1"):
+        """Replay attack: prover reuses a previous signed packet / stale nonce."""
+        self.provers[dc_id].enable_replay_nonce()
+
+    def stop_attack_replay(self, dc_id: str = "BOS-1"):
+        """Stop replay / stale-nonce attack on a node."""
+        self.provers[dc_id].disable_replay_nonce()
+
+    def start_attack_key_compromise(self, dc_id: str = "BOS-1"):
+        """Key-compromise attack: attacker can sign a forged known-good quote."""
+        self.provers[dc_id].compromise_key()
+
+    def stop_attack_key_compromise(self, dc_id: str = "BOS-1"):
+        """Stop key-compromise attack on a node."""
+        self.provers[dc_id].restore_key()
+
     def clear_attacks(self):
         for dc_id in self.fleet.dcs:
             self.fleet.disable_lie(dc_id)
             self.provers[dc_id].restore_firmware()
+            self.provers[dc_id].disable_replay_nonce()
+            self.provers[dc_id].restore_key()
             self.fleet.clear_spike(dc_id)
 
 
