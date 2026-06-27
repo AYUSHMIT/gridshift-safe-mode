@@ -6,3 +6,4 @@ altair>=5.0.0
 # fallback is rule-based if neither is installed/configured)
 anthropic>=0.40.0
 openai>=1.50.0
+matplotlib>=3.8.0
