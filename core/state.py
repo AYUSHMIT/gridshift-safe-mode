@@ -35,6 +35,20 @@ class Job:
     power_mw: float
     duration_ticks: int
     home_dc: str
+    # --- added for CCNC eval (Arash/DC) ---
+    region: str = ""                       # region of the DC currently hosting it
+    submit_tick: int = 0                   # when the job entered the system
+    base_duration_ticks: int = 0           # original runtime, for SLA reference
+    completed_tick: Optional[int] = None   # set when retired
+    # in-flight migration state (k-tick migration cost)
+    migrating: bool = False
+    migration_remaining: int = 0
+    migration_target: Optional[str] = None
+    migration_source: Optional[str] = None
+
+    def sla_deadline(self, slack: float) -> int:
+        """Ideal completion tick allowing a fractional slack on runtime."""
+        return self.submit_tick + int(self.base_duration_ticks * (1.0 + slack))
 
 
 @dataclass
