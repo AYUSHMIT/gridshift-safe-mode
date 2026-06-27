@@ -12,6 +12,7 @@ Every tick:
      (directional policy + observed-load override)
   6. Execute the surviving decisions
 """
+from typing import Optional
 from core.state import TickResult
 from core.grid_model import BostonGridModel
 from core.dc_simulator import DataCenterFleet
@@ -20,14 +21,16 @@ from core.prover import Prover
 from core.behavior_monitor import BehaviorMonitor
 from core.safety import DecisionEngine, SafetyController
 from core.attestation import generate_keypair
+from core.config import SimConfig
 
 
 class GridShiftOrchestrator:
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, config: Optional[SimConfig] = None):
+        self.cfg = config or SimConfig(seed=seed)
         self.grid = BostonGridModel()
-        self.fleet = DataCenterFleet(seed=seed)
+        self.fleet = DataCenterFleet(seed=seed, config=self.cfg)
         self.verifier = AttestationVerifier()
-        self.monitor = BehaviorMonitor()
+        self.monitor = BehaviorMonitor(detector_mode=self.cfg.detector_mode)
         self.engine = DecisionEngine()
         self.safety = SafetyController()
         self.provers: dict = {}
