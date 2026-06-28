@@ -84,6 +84,18 @@ python -m core.orchestrator
 
 This runs the supervisor-scenario attack end-to-end and prints the unwind behavior.
 
+## Reproducing experiment results
+
+```bash
+python -m experiments.run_results
+python -m experiments.fig_detector_compare
+python -m experiments.fig_policy_compare
+python -m experiments.fig_dc
+```
+
+CSV outputs are written to `experiments/results/` and figures are written to `experiments/figures/`.
+Generated PNG and CSV outputs are reproducibility artifacts and should not be committed unless explicitly needed.
+
 ## Module tests
 
 ```bash
