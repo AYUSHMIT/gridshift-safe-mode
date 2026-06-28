@@ -27,6 +27,7 @@ from core.dc_simulator import DataCenterFleet
 # If a DC's true load exceeds this fraction of its capacity,
 # emit an unwind-migration regardless of trust state.
 LOCAL_UNWIND_UTILIZATION = 0.75
+VALID_POLICIES = {"none", "freeze", "directional"}
 
 
 class DecisionEngine:
@@ -93,6 +94,14 @@ class SafetyController:
         authoritative for hard safety limits)
     """
 
+    def __init__(self, policy: str = "directional"):
+        if policy not in VALID_POLICIES:
+            raise ValueError(
+                f"invalid safety policy {policy!r}; expected one of "
+                f"{sorted(VALID_POLICIES)}"
+            )
+        self.policy = policy
+
     def apply(
         self,
         decisions: List[Decision],
@@ -101,14 +110,42 @@ class SafetyController:
     ) -> Tuple[List[Decision], bool]:
         bad_nodes = {n for n, lvl in trust_by_node.items()
                      if lvl != TrustLevel.TRUSTED}
+
+        # Policy `none` is the no-safety baseline used for experiments.
+        if self.policy == "none":
+            return list(decisions), False
+
         safe_mode = len(bad_nodes) > 0
 
         filtered: List[Decision] = []
 
-        # 1. Filter planned decisions by directional policy
+        # 1. Filter planned decisions according to policy.
         for d in decisions:
-            # Migration TARGET untrusted -> block (never place new
-            # work on a dubious node).
+            if self.policy == "freeze":
+                # Freeze policy blocks movement through untrusted nodes in
+                # either direction and falls back to delay when a migration
+                # would cross an untrusted boundary.
+                if d.action == ActionType.MIGRATE and (
+                    d.target_dc in bad_nodes or d.source_dc in bad_nodes
+                ):
+                    filtered.append(Decision(
+                        job_id=d.job_id,
+                        action=ActionType.DELAY,
+                        source_dc=d.source_dc,
+                        reason=(
+                            f"SAFE MODE (freeze): delay instead of migrating "
+                            f"job {d.job_id} through untrusted node"
+                        ),
+                    ))
+                    continue
+                if safe_mode and d.action == ActionType.DELAY:
+                    d.reason = f"[SAFE MODE] {d.reason}"
+                filtered.append(d)
+                continue
+
+            # Directional policy preserves the current implementation.
+            # Migration TARGET untrusted -> block (never place new work on a
+            # dubious node).
             if d.action == ActionType.MIGRATE and d.target_dc in bad_nodes:
                 filtered.append(Decision(
                     job_id=d.job_id,
@@ -131,7 +168,7 @@ class SafetyController:
                 filtered.append(d)
                 continue
 
-            # Delays are always fine
+            # Delays are always fine.
             if d.action == ActionType.DELAY:
                 if safe_mode:
                     d.reason = f"[SAFE MODE] {d.reason}"
@@ -142,9 +179,9 @@ class SafetyController:
                 d.reason = f"[SAFE MODE] {d.reason}"
             filtered.append(d)
 
-        # 2. Observed-load override: grid-side sensor is authoritative
-        unwinds = self._observed_load_unwinds(fleet, bad_nodes)
-        filtered.extend(unwinds)
+        # 2. Observed-load override: grid-side sensor is authoritative.
+        # This stays active under every policy for hard safety protection.
+        filtered.extend(self._observed_load_unwinds(fleet, bad_nodes))
 
         return filtered, safe_mode
 

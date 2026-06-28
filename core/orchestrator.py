@@ -32,7 +32,7 @@ class GridShiftOrchestrator:
         self.verifier = AttestationVerifier()
         self.monitor = BehaviorMonitor(detector_mode=self.cfg.detector_mode)
         self.engine = DecisionEngine()
-        self.safety = SafetyController()
+        self.safety = SafetyController(policy=self.cfg.policy)
         self.provers: dict = {}
         self.tick_num = 0
         self._bootstrap_provers()
