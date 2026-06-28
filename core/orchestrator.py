@@ -22,6 +22,7 @@ from core.behavior_monitor import BehaviorMonitor
 from core.safety import DecisionEngine, SafetyController
 from core.attestation import generate_keypair
 from core.config import SimConfig
+from core.adversary import configure_adversary
 
 
 class GridShiftOrchestrator:
@@ -35,6 +36,7 @@ class GridShiftOrchestrator:
         self.safety = SafetyController(policy=self.cfg.policy)
         self.provers: dict = {}
         self.tick_num = 0
+        self.last_adversary_events: list[str] = []
         self._bootstrap_provers()
 
     def _bootstrap_provers(self):
@@ -45,15 +47,14 @@ class GridShiftOrchestrator:
                 node_id=dc_id,
                 signing_key=priv,
                 load_source=(lambda d=dc: d.reported_load_mw()),
-                replay_nonce=self.cfg.replay_nonce,
-                key_compromise=self.cfg.key_compromise,
             )
-            if self.cfg.firmware_tamper:
-                prover.tamper_firmware()
             self.provers[dc_id] = prover
 
     def tick(self) -> TickResult:
         self.tick_num += 1
+        self.last_adversary_events = configure_adversary(
+            self, self.cfg, self.tick_num
+        )
 
         # 1. Evolve the simulation
         self.fleet.place_pending()
