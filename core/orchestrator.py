@@ -13,7 +13,7 @@ Every tick:
   6. Execute the surviving decisions
 """
 from typing import Optional
-from core.state import TickResult
+from core.state import TickResult, TrustLevel
 from core.grid_model import BostonGridModel
 from core.dc_simulator import DataCenterFleet
 from core.verifier import AttestationVerifier
@@ -89,6 +89,11 @@ class GridShiftOrchestrator:
             elif d.action.value == "migrate" and d.target_dc:
                 self.fleet.migrate(d.job_id, d.target_dc)
 
+        # 4b. Measure exposure: load left on untrusted nodes after mitigation.
+        bad_nodes = {n for n, lvl in trust_by_node.items()
+                     if lvl != TrustLevel.TRUSTED}
+        trapped_load_mw = self.fleet.load_on_nodes(bad_nodes)
+
         # 5. Advance running jobs
         self.fleet.tick()
 
@@ -98,6 +103,7 @@ class GridShiftOrchestrator:
             assessments=assessments,
             decisions=decisions,
             safe_mode=safe_mode,
+            trapped_load_mw=trapped_load_mw,
         )
 
     # ---- Demo controls ----

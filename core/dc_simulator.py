@@ -224,6 +224,18 @@ class DataCenterFleet:
             out[dc.region] = out.get(dc.region, 0.0) + dc.true_load_mw()
         return out
 
+    def load_on_nodes(self, node_ids) -> float:
+        """True load (MW) currently residing on the given set of nodes.
+
+        With node_ids = the untrusted/compromised set, this is the
+        load-weighted EXPOSURE ('trapped load') metric: it captures how
+        much real load sits on bad nodes -- which the directional policy
+        drains and freeze-all traps. Unlike a node-count, it responds to
+        the safety policy."""
+        ids = set(node_ids)
+        return sum(dc.true_load_mw()
+                   for k, dc in self.dcs.items() if k in ids)
+
     def inflight_count(self) -> int:
         return sum(1 for dc in self.dcs.values()
                    for j in dc.running_jobs if j.migrating)
