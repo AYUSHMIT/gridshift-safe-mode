@@ -135,7 +135,10 @@ def _plot_metric(ax, agg: dict, metric: str, title: str, y_label: str, scale: fl
 def make_figure(agg: dict) -> str:
     os.makedirs(OUTDIR, exist_ok=True)
 
-    fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.5))
+    # Safe-mode time and bad-node occupancy are constant across the compared
+    # configurations (they track attack duration, not the policy), so they are
+    # omitted; the four panels below are the ones that distinguish the methods.
+    fig, axes = plt.subplots(2, 2, figsize=(9.5, 7.5))
     axes = axes.flatten()
 
     _plot_metric(
@@ -146,31 +149,19 @@ def make_figure(agg: dict) -> str:
     )
     _plot_metric(
         axes[1], agg,
-        "safe_mode_ticks",
-        "Safe-mode time",
-        "ticks",
-    )
-    _plot_metric(
-        axes[2], agg,
-        "bad_node_ticks",
-        "Bad-node occupancy",
-        "node·ticks",
-    )
-    _plot_metric(
-        axes[3], agg,
         "migrations",
         "Migrations begun",
         "count",
     )
     _plot_metric(
-        axes[4], agg,
+        axes[2], agg,
         "completion_rate",
         "Completion rate",
         "%",
         scale=100.0,
     )
     _plot_metric(
-        axes[5], agg,
+        axes[3], agg,
         "sla_violation_rate",
         "SLA violation rate",
         "%",

@@ -12,9 +12,10 @@ Produces a 2-panel figure:
   (A) Pareto operating curve: overload exceedance vs job completion
   (B) SLA-violation rate vs offered load  (showcases migration cost)
 
-NOTE: this is the single-policy (directional) version. The full Fig 2
-cross-policy Pareto (none / freeze / directional) plugs into Ayush's
-harness once the policy switch lands -- the metric plumbing here is reused.
+This experiment ISOLATES the effect of workload intensity: it runs under
+the directional policy with NO adversary, so the load signal is not masked
+by the attack (the policy/detector/robustness figures carry the adversarial
+story). 10 seeds.
 
 Run:  python -m experiments.fig_dc
 """
@@ -24,20 +25,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from core.config import SimConfig
 from core.orchestrator import GridShiftOrchestrator
 
 TICKS = 50
-ATTACK_AT = 15
-ATTACK_DC = "BOS-1"
-SPIKE_MW = 45.0
-SEEDS = list(range(8))
-LOAD_LEVELS = [2, 4, 6, 8, 10, 12]   # jobs injected per 5-tick interval
+SEEDS = list(range(10))
+LOAD_LEVELS = [4, 8, 12, 16, 20, 24]   # jobs injected per 5-tick interval
 OUTDIR = os.path.join(os.path.dirname(__file__), "figures")
 
-
 def run_one(load: int, seed: int) -> dict:
-    """One simulation: returns scalar metrics for this (load, seed)."""
-    orch = GridShiftOrchestrator(seed=seed)
+    """One simulation: returns scalar metrics for this (load, seed).
+
+    No adversary (default SimConfig) so the figure isolates load intensity."""
+    cfg = SimConfig(seed=seed, policy="directional")
+    orch = GridShiftOrchestrator(seed=seed, config=cfg)
     orch.trigger_heatwave(TICKS)
     orch.submit_job_burst(load * 3)          # initial backlog scales with load
 
@@ -46,9 +47,6 @@ def run_one(load: int, seed: int) -> dict:
     for t in range(1, TICKS + 1):
         if t % 5 == 0:
             orch.submit_job_burst(load)
-        if t == ATTACK_AT:
-            orch.start_attack_tamper(ATTACK_DC)
-            orch.spike_load(ATTACK_DC, SPIKE_MW)
         r = orch.tick()
         over = max(0.0, r.grid.total_load_mw - r.grid.threshold_mw)
         overload_exceedance += over
@@ -92,9 +90,10 @@ def make_figure(agg):
     over_ci = np.array(agg["overload_exceedance"]["ci"])
     axA.errorbar(comp, over, yerr=over_ci, fmt="-o", color="#1f77b4",
                  capsize=3, lw=2, ms=7)
-    for x, y, lvl in zip(comp, over, LOAD_LEVELS):
+    for i, (x, y, lvl) in enumerate(zip(comp, over, LOAD_LEVELS)):
+        dy = 9 if i % 2 == 0 else -15      # stagger to avoid label overlap
         axA.annotate(f"load={lvl}", (x, y), textcoords="offset points",
-                     xytext=(6, 6), fontsize=8, color="#444")
+                     xytext=(7, dy), fontsize=8, color="#444")
     axA.set_xlabel("Job-completion rate (%)  → availability")
     axA.set_ylabel("Grid-overload exceedance (MW·ticks)")
     axA.set_title("(A) Safety–availability operating curve\n(directional policy, 9 DCs / 3 regions)")
