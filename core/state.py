@@ -115,4 +115,5 @@ class TickResult:
     assessments: List[TrustAssessment]
     decisions: List[Decision]
     safe_mode: bool
+    trapped_load_mw: float = 0.0   # load on untrusted nodes this tick (exposure)
     timestamp: float = field(default_factory=time.time)
