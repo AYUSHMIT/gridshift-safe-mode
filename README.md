@@ -96,6 +96,14 @@ python -m experiments.fig_dc
 CSV outputs are written to `experiments/results/` and figures are written to `experiments/figures/`.
 Generated PNG and CSV outputs are reproducibility artifacts and should not be committed unless explicitly needed.
 
+### Trace-calibrated comparison
+
+```bash
+python -m experiments.run_trace_compare
+```
+
+This compares the existing synthetic workload against a trace-calibrated workload sourced from a normalized `tick,power_mw` CSV. The trace only calibrates the data-center workload component; it does not replace the ISO-NE regional grid demand.
+
 ## Module tests
 
 ```bash
