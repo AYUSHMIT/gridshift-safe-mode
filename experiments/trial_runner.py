@@ -12,6 +12,7 @@ from core.orchestrator import GridShiftOrchestrator
 from core.state import TrustLevel
 
 from experiments.workloads import (
+    DerivedTraceWorkloadSource,
     SyntheticWorkloadSource,
     TraceWorkloadSource,
 )
@@ -30,7 +31,10 @@ class TrialSpec:
 
 
 def _resolve_workload_jobs(workload_source, tick: int) -> int:
-    if isinstance(workload_source, (SyntheticWorkloadSource, TraceWorkloadSource)):
+    if isinstance(
+        workload_source,
+        (SyntheticWorkloadSource, TraceWorkloadSource, DerivedTraceWorkloadSource),
+    ):
         return workload_source.jobs_for_tick(tick)
 
     jobs_for_tick = getattr(workload_source, "jobs_for_tick", None)
@@ -63,7 +67,10 @@ def run_trial(*, spec: TrialSpec) -> dict:
     for tick in range(1, spec.ticks + 1):
         jobs = _resolve_workload_jobs(workload_source, tick)
         if jobs:
-            orch.submit_job_burst(jobs)
+            if isinstance(jobs, int):
+                orch.submit_job_burst(jobs)
+            else:
+                orch.submit_jobs(jobs)
 
         result = orch.tick()
         overload_exceedance += max(
@@ -79,17 +86,32 @@ def run_trial(*, spec: TrialSpec) -> dict:
     submitted = orch.fleet._job_counter
     completed = len(orch.fleet.completed)
     sla = orch.fleet.sla_stats()
+    total_submitted_work = _submitted_work(orch)
 
     return {
         "experiment": spec.experiment,
         "case": spec.case,
+        "workload_source": getattr(spec.workload_source, "name", spec.case),
         "policy": spec.policy,
         "detector_mode": spec.detector_mode,
         "seed": spec.seed,
+        "load_scale": float(getattr(spec.workload_source, "load_scale", 1.0)),
+        "overload": float(overload_exceedance),
         "overload_exceedance": float(overload_exceedance),
         "safe_mode_ticks": float(safe_mode_ticks),
         "bad_node_ticks": float(bad_node_ticks),
         "migrations": float(orch.fleet.migration_count),
+        "submitted_jobs": int(submitted),
+        "completed_jobs": int(completed),
+        "total_submitted_work": float(total_submitted_work),
         "completion_rate": completed / max(1, submitted),
         "sla_violation_rate": float(sla["sla_violation_rate"]),
     }
+
+
+def _submitted_work(orch: GridShiftOrchestrator) -> float:
+    jobs = list(orch.fleet.completed) + list(orch.fleet.pending_jobs)
+    for dc in orch.fleet.dcs.values():
+        jobs.extend(dc.running_jobs)
+        jobs.extend(dc.delayed_jobs)
+    return sum(j.power_mw * j.base_duration_ticks for j in jobs)

@@ -95,20 +95,49 @@ class DataCenterFleet:
                       JobPriority.MIGRATABLE]
         weights = [0.2, 0.4, 0.4]
         for _ in range(n):
-            self._job_counter += 1
             pri = random.choices(priorities, weights=weights)[0]
-            home = random.choice(list(self.dcs.keys()))
             dur = random.randint(self.cfg.job_dur_min, self.cfg.job_dur_max)
+            self.submit_jobs(
+                [{
+                    "priority": pri,
+                    "power_mw": round(random.uniform(
+                        self.cfg.job_power_min_mw,
+                        self.cfg.job_power_max_mw,
+                    ), 2),
+                    "duration_ticks": dur,
+                }]
+            )
+
+    def submit_jobs(self, job_specs):
+        """Submit explicit experiment-generated job specs."""
+        for spec in job_specs:
+            priority = _spec_value(spec, "priority")
+            power_mw = float(_spec_value(spec, "power_mw"))
+            duration_ticks = int(_spec_value(spec, "duration_ticks"))
+            if duration_ticks <= 0:
+                raise ValueError("Submitted jobs must have positive duration_ticks")
+            if power_mw < 0:
+                raise ValueError("Submitted jobs must have non-negative power_mw")
+
+            if not isinstance(priority, JobPriority):
+                priority = JobPriority(str(priority))
+
+            home = _spec_value(spec, "home_dc", None)
+            if home is None:
+                home = random.choice(list(self.dcs.keys()))
+            if home not in self.dcs:
+                raise ValueError(f"Unknown home_dc for submitted job: {home}")
+
+            self._job_counter += 1
             job = Job(
                 job_id=f"J{self._job_counter:04d}",
-                priority=pri,
-                power_mw=round(random.uniform(
-                    self.cfg.job_power_min_mw, self.cfg.job_power_max_mw), 2),
-                duration_ticks=dur,
+                priority=priority,
+                power_mw=round(power_mw, 2),
+                duration_ticks=duration_ticks,
                 home_dc=home,
                 region=self.dcs[home].region,
                 submit_tick=self.now,
-                base_duration_ticks=dur,
+                base_duration_ticks=duration_ticks,
             )
             self.pending_jobs.append(job)
 
@@ -297,6 +326,12 @@ class DataCenterFleet:
 
     def clear_spike(self, dc_id: str):
         self.dcs[dc_id].spike_mw = 0.0
+
+
+def _spec_value(spec, key: str, default=None):
+    if isinstance(spec, dict):
+        return spec.get(key, default)
+    return getattr(spec, key, default)
 
 
 if __name__ == "__main__":

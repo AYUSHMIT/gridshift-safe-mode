@@ -113,6 +113,9 @@ class GridShiftOrchestrator:
     def submit_job_burst(self, n: int = 12):
         self.fleet.submit_burst(n)
 
+    def submit_jobs(self, job_specs):
+        self.fleet.submit_jobs(job_specs)
+
     def start_attack_lying(self, dc_id: str = "BOS-1", delta: float = 16.0):
         """Behavioral attack: controller lies about its load."""
         self.fleet.enable_lie(dc_id, delta)

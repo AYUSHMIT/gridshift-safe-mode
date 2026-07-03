@@ -1,58 +1,71 @@
 # Trace-Calibrated Workloads
 
-This directory contains the normalized trace interface used by GridShift.
+This directory contains the small trace interfaces used by GridShift tests and
+experiment runners. It does not contain raw Google ClusterData exports.
 
-## Placeholder sample
+## Development Fixtures
 
 [`google_power_sample.csv`](google_power_sample.csv) is a small development-only
-placeholder. It is not real Google data and should only be used to exercise the
-loader and plotting code during development.
+power trace. It is not real Google data and should only be used to exercise
+legacy loader or plotting code.
 
-## Real Google PowerData 2019 workflow
-
-Google publishes PowerData 2019 through BigQuery and documents the trace in
-[`PowerData2019.md`](https://github.com/google/cluster-data/blob/master/PowerData2019.md).
-The notebook referenced there, [`power_trace_analysis_colab.ipynb`](https://github.com/google/cluster-data/blob/master/power_trace_analysis_colab.ipynb),
-shows that the raw tables are queried from the `powerdata_2019` dataset and use
-columns such as `time`, `measured_power_util`, `production_power_util`,
-`bad_measurement_data`, and `bad_production_power_data`.
-
-The raw Google export is a power-utilization trace, not a pre-normalized
-GridShift CSV. To build a local normalized trace:
-
-1. Export the raw Google PowerData rows locally from BigQuery.
-2. If your export already contains a direct power column in MW, pass it to the
-	 converter with `--power-column`.
-3. If your export only contains utilization columns, pass the utilization
-	 series directly with `--utilization-column`. The converter will preserve the
-	 temporal pattern and normalize the shape against a reference trace.
-4. Run the converter with `--reference-trace data/traces/google_power_sample.csv`
-   or another normalized GridShift trace to preserve the temporal pattern while
-   normalizing to the existing workload range.
-5. The converter writes `data/traces/google_power_2019_normalized.csv`.
-
-Example:
-
-```bash
-python -m experiments.convert_google_power_trace \
-	--input /path/to/local/google_power_export.csv \
-	--utilization-column production_power_util \
-	--reference-trace data/traces/google_power_sample.csv \
-	--output data/traces/google_power_2019_normalized.csv
-```
-
-The normalized output always uses:
+[`google_cluster_derived_5min.csv`](google_cluster_derived_5min.csv) is a tiny
+derived-workload fixture with the schema used by the trace-calibrated
+experiment:
 
 ```csv
-tick,power_mw
+tick,arrivals,cpu_demand_norm,duration_p50,duration_p90,priority_high_frac,latency_sensitive_frac
 ```
 
-Each row is a sequential simulation tick. The trace calibrates only the data-
-center workload demand. It must not replace ISO-NE regional grid demand inside
-the simulator.
+The checked-in CSV is suitable for sanity checks and local development. It is
+not a paper-grade Google ClusterData result.
 
-## Repository policy
+## Paper-Grade ClusterData Workflow
 
-Large public datasets and generated normalized outputs are **not** committed
-to this repository. Keep Google raw exports local and configurable, and only
-check in tiny placeholder traces used for testing.
+Paper-grade experiments require derived ClusterData2019 summaries generated
+externally from BigQuery. Raw Google ClusterData rows are large and are not
+committed to this repository.
+
+The expected external workflow is:
+
+1. Query Google ClusterData2019 task/job tables in BigQuery.
+2. Aggregate rows into 5-minute simulation ticks.
+3. Export only the derived summary columns listed above.
+4. Replace or point the experiment runner at a derived CSV such as
+   `data/traces/google_cluster_derived_5min.csv`.
+5. Record the BigQuery query, filters, date/window, and normalization choices
+   in the paper artifact or experiment log.
+
+Column meanings:
+
+- `tick`: sequential 5-minute simulation tick.
+- `arrivals`: task/job arrivals represented by that tick.
+- `cpu_demand_norm`: normalized CPU demand in `[0, 1]`, mapped to GridShift job
+  power by the experiment layer.
+- `duration_p50`: median job duration in simulation ticks.
+- `duration_p90`: 90th percentile job duration in simulation ticks.
+- `priority_high_frac`: fraction of arrivals treated as high-priority critical
+  work.
+- `latency_sensitive_frac`: fraction of non-critical arrivals treated as
+  flexible but latency-sensitive work.
+
+Validation rules enforced by the loader:
+
+- required columns must be present,
+- ticks must be unique and non-negative,
+- arrivals and normalized CPU demand cannot be negative,
+- durations must be positive,
+- `duration_p90 >= duration_p50`,
+- fraction columns must be within `[0, 1]`.
+
+Run the lightweight sanity check with:
+
+```bash
+python -m experiments.validate_trace_workload
+```
+
+## Repository Policy
+
+Large public datasets, raw BigQuery exports, and generated paper-grade derived
+outputs should stay local or be stored in an external artifact bucket. Commit
+only tiny fixtures that exercise the loader and experiment code.
