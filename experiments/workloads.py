@@ -84,10 +84,9 @@ class TraceWorkloadSource(WorkloadSource):
         return power_at_tick(points, tick)
 
     def jobs_for_tick(self, tick: int) -> int:
-        raise RuntimeError(
-            "TraceWorkloadSource.jobs_for_tick() requires a loaded trace profile; "
-            "use the trial runner helpers instead."
-        )
+        points = self.load()
+        power_mw = self.power_for_tick(points, tick)
+        return power_to_job_count(power_mw)
 
 
 def jobs_from_trace_power(power_mw: float) -> int:

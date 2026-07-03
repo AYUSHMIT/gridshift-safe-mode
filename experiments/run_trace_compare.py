@@ -13,7 +13,7 @@ TICKS = 50
 INITIAL_BURST = 30
 STEADY_BURST = 5
 ROOT = os.path.dirname(os.path.dirname(__file__))
-TRACE_PATH = os.path.join(ROOT, "data", "traces", "google_power_2019_normalized.csv")
+TRACE_PATH = os.path.join(ROOT, "data", "traces", "google_power_sample.csv")
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 POLICIES = ["none", "freeze", "directional"]

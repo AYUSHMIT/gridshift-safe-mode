@@ -14,7 +14,6 @@ from core.state import TrustLevel
 from experiments.workloads import (
     SyntheticWorkloadSource,
     TraceWorkloadSource,
-    jobs_from_trace_power,
 )
 
 
@@ -30,14 +29,9 @@ class TrialSpec:
     ticks: int
 
 
-def _resolve_workload_jobs(workload_source, tick: int, trace_points=None) -> int:
-    if isinstance(workload_source, SyntheticWorkloadSource):
+def _resolve_workload_jobs(workload_source, tick: int) -> int:
+    if isinstance(workload_source, (SyntheticWorkloadSource, TraceWorkloadSource)):
         return workload_source.jobs_for_tick(tick)
-
-    if isinstance(workload_source, TraceWorkloadSource):
-        points = trace_points if trace_points is not None else workload_source.load()
-        power_mw = workload_source.power_for_tick(points, tick)
-        return jobs_from_trace_power(power_mw)
 
     jobs_for_tick = getattr(workload_source, "jobs_for_tick", None)
     if callable(jobs_for_tick):
@@ -60,10 +54,6 @@ def run_trial(*, spec: TrialSpec) -> dict:
     if hasattr(workload_source, "reset"):
         workload_source.reset(spec.seed)
 
-    trace_points = None
-    if isinstance(workload_source, TraceWorkloadSource):
-        trace_points = workload_source.load()
-
     orch.trigger_heatwave(spec.ticks)
 
     overload_exceedance = 0.0
@@ -71,7 +61,7 @@ def run_trial(*, spec: TrialSpec) -> dict:
     bad_node_ticks = 0
 
     for tick in range(1, spec.ticks + 1):
-        jobs = _resolve_workload_jobs(workload_source, tick, trace_points)
+        jobs = _resolve_workload_jobs(workload_source, tick)
         if jobs:
             orch.submit_job_burst(jobs)
 
