@@ -82,12 +82,21 @@ class SyntheticWorkloadSource(WorkloadSource):
     load_scale: float = 1.0
     avg_power_mw: float = 3.75
     avg_duration_ticks: float = 7.5
+    target_work_units: float | None = None
+    calibration_ticks: int | None = None
     name: str = "synthetic"
 
     def reset(self, seed: int) -> None:
         self._rng = random.Random(seed)
+        self._jobs_by_tick = None
+        if self.target_work_units is not None:
+            self._jobs_by_tick = self._build_calibrated_jobs()
 
-    def jobs_for_tick(self, tick: int) -> int:
+    def jobs_for_tick(self, tick: int) -> int | list[WorkloadJobSpec]:
+        jobs_by_tick = getattr(self, "_jobs_by_tick", None)
+        if jobs_by_tick is not None:
+            return list(jobs_by_tick.get(tick, []))
+
         base = 0
         if tick == 1:
             base = self.initial_burst
@@ -103,6 +112,57 @@ class SyntheticWorkloadSource(WorkloadSource):
             elif tick % self.steady_period == 0:
                 arrivals += self.steady_burst
         return arrivals * self.load_scale * self.avg_power_mw * self.avg_duration_ticks
+
+    def _build_calibrated_jobs(self) -> dict[int, list[WorkloadJobSpec]]:
+        if self.calibration_ticks is None:
+            raise ValueError("calibration_ticks is required with target_work_units")
+
+        jobs_by_tick: dict[int, list[WorkloadJobSpec]] = {}
+        all_specs: list[WorkloadJobSpec] = []
+        priorities = [
+            JobPriority.CRITICAL,
+            JobPriority.FLEXIBLE,
+            JobPriority.MIGRATABLE,
+        ]
+        weights = [0.2, 0.4, 0.4]
+
+        for tick in range(1, self.calibration_ticks + 1):
+            base = 0
+            if tick == 1:
+                base = self.initial_burst
+            elif tick % self.steady_period == 0:
+                base = self.steady_burst
+            count = _scaled_count(base, self.load_scale, self._rng)
+            if count <= 0:
+                continue
+            specs = []
+            for _ in range(count):
+                duration = self._rng.randint(3, 12)
+                spec = WorkloadJobSpec(
+                    priority=self._rng.choices(priorities, weights=weights)[0],
+                    power_mw=round(self._rng.uniform(1.5, 6.0), 2),
+                    duration_ticks=duration,
+                )
+                specs.append(spec)
+                all_specs.append(spec)
+            jobs_by_tick[tick] = specs
+
+        current_work = sum(s.power_mw * s.duration_ticks for s in all_specs)
+        if current_work <= 0:
+            return jobs_by_tick
+
+        scale = self.target_work_units / current_work
+        return {
+            tick: [
+                WorkloadJobSpec(
+                    priority=spec.priority,
+                    power_mw=round(max(0.0, spec.power_mw * scale), 4),
+                    duration_ticks=spec.duration_ticks,
+                )
+                for spec in specs
+            ]
+            for tick, specs in jobs_by_tick.items()
+        }
 
 
 @dataclass(frozen=True)

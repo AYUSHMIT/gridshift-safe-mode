@@ -53,7 +53,19 @@ def _trace_workload(load_scale: float) -> DerivedTraceWorkloadSource:
     return DerivedTraceWorkloadSource(trace_path=TRACE_PATH, load_scale=load_scale)
 
 
-def _synthetic_workload(load_scale: float) -> SyntheticWorkloadSource:
+def _sampled_work_units(source, *, seed: int, ticks: int) -> float:
+    source.reset(seed)
+    total = 0.0
+    for tick in range(1, ticks + 1):
+        jobs = source.jobs_for_tick(tick)
+        if isinstance(jobs, int):
+            total += jobs * source.avg_power_mw * source.avg_duration_ticks
+        else:
+            total += sum(job.power_mw * job.duration_ticks for job in jobs)
+    return total
+
+
+def _synthetic_workload(load_scale: float, *, seed: int) -> SyntheticWorkloadSource:
     trace_units = _trace_workload(load_scale).expected_work_units(TICKS)
     synthetic_base = SyntheticWorkloadSource(
         initial_burst=INITIAL_BURST,
@@ -61,10 +73,17 @@ def _synthetic_workload(load_scale: float) -> SyntheticWorkloadSource:
     )
     synthetic_units = synthetic_base.expected_work_units(TICKS)
     matched_scale = trace_units / synthetic_units if synthetic_units else load_scale
+    trace_sampled_units = _sampled_work_units(
+        _trace_workload(load_scale),
+        seed=seed,
+        ticks=TICKS,
+    )
     return SyntheticWorkloadSource(
         initial_burst=INITIAL_BURST,
         steady_burst=STEADY_BURST,
         load_scale=matched_scale,
+        target_work_units=trace_sampled_units,
+        calibration_ticks=TICKS,
     )
 
 
@@ -76,7 +95,7 @@ def run_workload_trial(
     load_scale: float = 1.0,
 ) -> dict:
     if workload_source == "synthetic":
-        source = _synthetic_workload(load_scale)
+        source = _synthetic_workload(load_scale, seed=seed)
     elif workload_source == "trace-calibrated":
         source = _trace_workload(load_scale)
     else:
