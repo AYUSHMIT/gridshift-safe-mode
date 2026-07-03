@@ -42,11 +42,20 @@ Required by default:
 - `cpu_request`: CPU demand or normalized CPU request. If already normalized
   into `[0, 1]`, pass `--cpu-already-normalized`; otherwise the builder
   normalizes by the maximum observed value or `--cpu-normalization-max`.
-- `priority`: numeric priority. Values greater than or equal to
-  `--priority-high-threshold` are counted as high priority. Default threshold:
-  `9`.
+- `priority`: numeric ClusterData priority. The official ClusterData2019
+  priority tiers used by Google's analysis are:
+  - `0-99`: free
+  - `100-115`: BE/BEB
+  - `116-119`: mid
+  - `>=120`: production
+  For ClusterData2019, `--priority-high-threshold` should usually be `116`
+  if you want mid+production counted as high priority, or `120` if you only
+  want production counted as high priority. The builder default is lower for
+  generic fixtures, so pass the threshold explicitly for real ClusterData2019.
 - `latency_sensitive`: boolean-like flag (`true`, `1`, `yes`) used to compute
-  the latency-sensitive fraction.
+  the latency-sensitive fraction. ClusterData2019 does not always expose an
+  explicit latency label; this should be a documented heuristic if no explicit
+  latency column is available.
 
 Alternative inputs are supported with flags:
 
@@ -94,7 +103,17 @@ experiments/sql/google_cluster_preprocessed_export.sql
 
 That SQL file is a template. Update project, dataset, table, event-type, and
 resource-field names to match the specific public or mirrored ClusterData2019
-tables you use.
+tables you use. The official Google analysis Colab uses table families shaped
+like:
+
+```text
+`google.com:google-cluster-data`.clusterdata_2019_{cell}.instance_events
+`google.com:google-cluster-data`.clusterdata_2019_{cell}.instance_usage
+`google.com:google-cluster-data`.clusterdata_2019_{cell}.machine_events
+```
+
+The SQL template follows that naming pattern but remains intentionally
+parameterized. It does not make the checked-in fixture paper-grade.
 
 Column meanings:
 
@@ -132,7 +151,8 @@ python -m experiments.build_google_cluster_summary \
   --input /path/to/cluster_tasks_preprocessed.csv \
   --output data/traces/google_cluster_derived_5min.csv \
   --time-unit micros \
-  --cpu-already-normalized
+  --cpu-already-normalized \
+  --priority-high-threshold 120
 
 # 2. Sanity-check the derived workload consumed by GridShift.
 python -m experiments.validate_trace_workload

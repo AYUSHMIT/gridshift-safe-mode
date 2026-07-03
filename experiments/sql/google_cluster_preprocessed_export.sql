@@ -8,9 +8,15 @@
 --   start_time,end_time,cpu_request,priority,latency_sensitive
 --
 -- Important:
---   This is a template, not a guaranteed public-table schema. Google
---   ClusterData mirrors differ in table names and resource-field layout.
---   Replace every identifier wrapped in angle brackets before running.
+--   This is a template, not a hard-coded final export. It follows the table
+--   naming used by the official Google ClusterData analysis Colab:
+--
+--     `google.com:google-cluster-data`.clusterdata_2019_{cell}.instance_events
+--     `google.com:google-cluster-data`.clusterdata_2019_{cell}.instance_usage
+--     `google.com:google-cluster-data`.clusterdata_2019_{cell}.machine_events
+--
+--   Replace {cell}, timestamp filters, event-type filters, and field names to
+--   match the exact public table schema or local mirror you query.
 --
 -- Recommended export command after adapting the query:
 --   bq query --use_legacy_sql=false --format=csv < experiments/sql/google_cluster_preprocessed_export.sql \
@@ -18,33 +24,79 @@
 
 DECLARE window_start INT64 DEFAULT <START_TIME_MICROS>;
 DECLARE window_end   INT64 DEFAULT <END_TIME_MICROS>;
+DECLARE production_priority_threshold INT64 DEFAULT 120;
+DECLARE mid_priority_threshold INT64 DEFAULT 116;
 
-WITH task_events AS (
+WITH started_instances AS (
   SELECT
-    -- ClusterData timestamps are commonly represented in microseconds.
+    -- Adjust identifier columns if your mirror uses different names.
+    collection_id,
+    instance_index,
+    machine_id,
+
+    -- Instance start/finish timestamps are commonly microseconds in
+    -- ClusterData exports. Keep --time-unit micros in the builder unless your
+    -- preprocessing converts them.
     CAST(start_time AS INT64) AS start_time,
     CAST(end_time AS INT64) AS end_time,
 
-    -- Use the CPU request / demand field from your preprocessed task table.
-    -- If this value is already normalized to [0, 1], run the builder with
-    -- --cpu-already-normalized. Otherwise provide --cpu-normalization-max or
-    -- let the builder normalize by the maximum exported value.
-    CAST(cpu_request AS FLOAT64) AS cpu_request,
-
-    -- Numeric priority. The builder default treats >= 9 as high priority.
+    -- Official priority tier convention:
+    --   0-99    free
+    --   100-115 BE/BEB
+    --   116-119 mid
+    --   >=120   production
     CAST(priority AS FLOAT64) AS priority,
 
-    -- ClusterData may not directly label latency-sensitive work. Replace this
-    -- heuristic with your documented rule. Common options are: high priority,
-    -- a scheduling class, a job name allowlist, or an externally joined label.
-    CAST(priority AS FLOAT64) >= 9 AS latency_sensitive
-  FROM `<PROJECT>.<DATASET>.<PREPROCESSED_TASK_TABLE>`
+    CASE
+      WHEN CAST(priority AS INT64) >= production_priority_threshold THEN 'production'
+      WHEN CAST(priority AS INT64) >= mid_priority_threshold THEN 'mid'
+      WHEN CAST(priority AS INT64) >= 100 THEN 'be_beb'
+      ELSE 'free'
+    END AS priority_tier
+  FROM `google.com:google-cluster-data.clusterdata_2019_<CELL>.instance_events`
   WHERE start_time IS NOT NULL
     AND end_time IS NOT NULL
     AND end_time > start_time
-    AND cpu_request IS NOT NULL
     AND start_time >= window_start
     AND start_time < window_end
+    -- TODO: keep only runnable/scheduled instance rows for your schema.
+    -- The official/mirrored event type names may differ; inspect distinct
+    -- event_type values before finalizing this filter.
+    -- AND event_type IN ('SUBMIT', 'SCHEDULE', 'START')
+),
+
+usage_by_instance AS (
+  SELECT
+    collection_id,
+    instance_index,
+    -- Use the relevant normalized CPU usage/request field from
+    -- instance_usage. The official analysis commonly works with per-instance
+    -- CPU metrics over time; this template averages usage inside the instance
+    -- lifetime after joining to started_instances below.
+    AVG(CAST(cpu_usage AS FLOAT64)) AS cpu_request
+  FROM `google.com:google-cluster-data.clusterdata_2019_<CELL>.instance_usage`
+  WHERE start_time >= window_start
+    AND start_time < window_end
+    -- TODO: replace cpu_usage with the exact field you want to normalize,
+    -- such as average_usage.cpus, assigned_memory/cpus fields, or a
+    -- precomputed request column in your mirror.
+  GROUP BY collection_id, instance_index
+),
+
+preprocessed AS (
+  SELECT
+    s.start_time,
+    s.end_time,
+    COALESCE(u.cpu_request, 0.0) AS cpu_request,
+    s.priority,
+
+    -- No explicit latency-sensitive label is guaranteed. Treat production
+    -- priority as a conservative heuristic unless you have a better external
+    -- label or scheduling-class join.
+    s.priority >= production_priority_threshold AS latency_sensitive
+  FROM started_instances AS s
+  LEFT JOIN usage_by_instance AS u
+    USING (collection_id, instance_index)
 )
 
 SELECT
@@ -53,5 +105,6 @@ SELECT
   cpu_request,
   priority,
   latency_sensitive
-FROM task_events
+FROM preprocessed
+WHERE cpu_request IS NOT NULL
 ORDER BY start_time;
