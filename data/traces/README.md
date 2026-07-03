@@ -112,6 +112,36 @@ like:
 `google.com:google-cluster-data`.clusterdata_2019_{cell}.machine_events
 ```
 
+Verified fields used by the template:
+
+- `instance_events`
+  - `time`
+  - `priority`
+  - `scheduling_class`
+  - `resource_request.cpus`
+  - `collection_id`
+  - `instance_index`
+  - `machine_id`
+- `instance_usage`
+  - `start_time`
+  - `end_time`
+  - `average_usage.cpus`
+  - `maximum_usage.cpus`
+  - `collection_id`
+  - `instance_index`
+  - `machine_id`
+
+The template uses `instance_events.time` as the arrival timestamp and joins to
+`instance_usage` for runtime bounds. Use `resource_request.cpus` as the default
+CPU demand field unless your paper artifact documents a different choice such
+as `average_usage.cpus` or `maximum_usage.cpus`.
+
+Important verified correction: do not filter `instance_usage` with
+`alloc_collection_id IS NULL`. The BigQuery tables we checked have the
+overwhelming majority of usable rows under `alloc_collection_id = 0`. The SQL
+template uses `alloc_collection_id = 0`; remove or adapt that predicate only if
+your mirror omits the field, and document the choice.
+
 The SQL template follows that naming pattern but remains intentionally
 parameterized. It does not make the checked-in fixture paper-grade.
 
