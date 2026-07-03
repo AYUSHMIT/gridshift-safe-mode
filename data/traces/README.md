@@ -26,6 +26,37 @@ Paper-grade experiments require derived ClusterData2019 summaries generated
 externally from BigQuery. Raw Google ClusterData rows are large and are not
 committed to this repository.
 
+### Preprocessed CSV schema
+
+`experiments/build_google_cluster_summary.py` expects a local preprocessed CSV
+with one row per runnable task/job attempt. The default column mapping is:
+
+```csv
+start_time,end_time,cpu_request,priority,latency_sensitive
+```
+
+Required by default:
+
+- `start_time`: task/job arrival timestamp. Default unit is microseconds.
+- `end_time`: task/job finish timestamp. Default unit is microseconds.
+- `cpu_request`: CPU demand or normalized CPU request. If already normalized
+  into `[0, 1]`, pass `--cpu-already-normalized`; otherwise the builder
+  normalizes by the maximum observed value or `--cpu-normalization-max`.
+- `priority`: numeric priority. Values greater than or equal to
+  `--priority-high-threshold` are counted as high priority. Default threshold:
+  `9`.
+- `latency_sensitive`: boolean-like flag (`true`, `1`, `yes`) used to compute
+  the latency-sensitive fraction.
+
+Alternative inputs are supported with flags:
+
+- use `--duration-column` instead of `--end-time-column` if preprocessing
+  already computed runtime,
+- use `--time-unit seconds|millis|micros|nanos` for timestamp units,
+- use `--duration-unit seconds|millis|micros|nanos` for duration units,
+- pass an empty optional column name, such as `--latency-column ''`, if that
+  field is unavailable and should be treated as all false.
+
 The expected external workflow is:
 
 1. Query Google ClusterData2019 task/job tables in BigQuery.
@@ -44,6 +75,26 @@ python -m experiments.build_google_cluster_summary \
    `data/traces/google_cluster_derived_5min.csv`.
 5. Record the BigQuery query, filters, date/window, and normalization choices
    in the paper artifact or experiment log.
+
+The repository includes a tiny local fixture for command testing:
+
+```bash
+python -m experiments.build_google_cluster_summary \
+  --input data/traces/google_cluster_preprocessed_sample.csv \
+  --output /tmp/google_cluster_derived_5min.csv \
+  --time-unit micros \
+  --cpu-already-normalized
+```
+
+For BigQuery export guidance, see:
+
+```text
+experiments/sql/google_cluster_preprocessed_export.sql
+```
+
+That SQL file is a template. Update project, dataset, table, event-type, and
+resource-field names to match the specific public or mirrored ClusterData2019
+tables you use.
 
 Column meanings:
 
@@ -72,6 +123,27 @@ Run the lightweight sanity check with:
 ```bash
 python -m experiments.validate_trace_workload
 ```
+
+End-to-end commands for the trace comparison are:
+
+```bash
+# 1. Build and validate the derived 5-minute summary.
+python -m experiments.build_google_cluster_summary \
+  --input /path/to/cluster_tasks_preprocessed.csv \
+  --output data/traces/google_cluster_derived_5min.csv \
+  --time-unit micros \
+  --cpu-already-normalized
+
+# 2. Sanity-check the derived workload consumed by GridShift.
+python -m experiments.validate_trace_workload
+
+# 3. Run the paired synthetic vs trace-calibrated comparison.
+python -m experiments.run_trace_compare
+```
+
+Do not claim paper-grade results unless `google_cluster_derived_5min.csv` was
+generated from a documented ClusterData2019 BigQuery export rather than the
+checked-in development fixture.
 
 ## Repository Policy
 
