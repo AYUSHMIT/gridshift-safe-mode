@@ -29,8 +29,17 @@ committed to this repository.
 The expected external workflow is:
 
 1. Query Google ClusterData2019 task/job tables in BigQuery.
-2. Aggregate rows into 5-minute simulation ticks.
-3. Export only the derived summary columns listed above.
+2. Export a preprocessed task/job CSV with start time, runtime/end time, CPU
+   demand, priority, and optional latency-sensitivity fields.
+3. Build the derived GridShift summary, which aggregates rows into 5-minute
+   simulation ticks:
+
+```bash
+python -m experiments.build_google_cluster_summary \
+  --input /path/to/cluster_tasks_preprocessed.csv \
+  --output data/traces/google_cluster_derived_5min.csv
+```
+
 4. Replace or point the experiment runner at a derived CSV such as
    `data/traces/google_cluster_derived_5min.csv`.
 5. Record the BigQuery query, filters, date/window, and normalization choices
