@@ -129,25 +129,39 @@ class DataCenterFleet:
         self.submit_burst(k - 1)
 
     def place_pending(self):
-        """Greedy-place pending jobs in their home DC if possible."""
+        """Greedy-place resumable delayed jobs, then pending jobs."""
+        for dc in self.dcs.values():
+            still_delayed = []
+            for job in dc.delayed_jobs:
+                if job.delayed_until_tick is not None and self.now < job.delayed_until_tick:
+                    still_delayed.append(job)
+                    continue
+                if self._place_job(job):
+                    job.delayed_until_tick = None
+                else:
+                    still_delayed.append(job)
+            dc.delayed_jobs = still_delayed
+
         still_pending = []
         for job in self.pending_jobs:
-            dc = self.dcs[job.home_dc]
-            if dc.can_accept(job):
-                dc.running_jobs.append(job)
-            else:
-                # Try any DC that can accept it
-                placed = False
-                for alt_dc in self.dcs.values():
-                    if alt_dc.can_accept(job):
-                        job.home_dc = alt_dc.dc_id
-                        job.region = alt_dc.region
-                        alt_dc.running_jobs.append(job)
-                        placed = True
-                        break
-                if not placed:
-                    still_pending.append(job)
+            if not self._place_job(job):
+                still_pending.append(job)
         self.pending_jobs = still_pending
+
+    def _place_job(self, job: Job) -> bool:
+        dc = self.dcs[job.home_dc]
+        if dc.can_accept(job):
+            dc.running_jobs.append(job)
+            return True
+
+        # Try any DC that can accept it
+        for alt_dc in self.dcs.values():
+            if alt_dc.can_accept(job):
+                job.home_dc = alt_dc.dc_id
+                job.region = alt_dc.region
+                alt_dc.running_jobs.append(job)
+                return True
+        return False
 
     def migrate(self, job_id: str, target_dc_id: str) -> bool:
         """Begin a k-tick migration of job to target_dc.
@@ -183,6 +197,7 @@ class DataCenterFleet:
             for j in dc.running_jobs:
                 if j.job_id == job_id and j.priority != JobPriority.CRITICAL:
                     dc.running_jobs.remove(j)
+                    j.delayed_until_tick = self.now + max(0, self.cfg.delay_ticks)
                     dc.delayed_jobs.append(j)
                     return True
         return False

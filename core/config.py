@@ -30,6 +30,7 @@ class SimConfig:
     job_power_max_mw: float = 6.0
     job_dur_min: int = 3
     job_dur_max: int = 12
+    delay_ticks: int = 3                    # ticks before delayed jobs can resume
 
     # ---- migration cost (Arash) ----
     migration_ticks: int = 2                # k: ticks a job is in-flight
