@@ -7,6 +7,7 @@ optional heatwave stress, and a pluggable DC-load input.
 """
 import math
 from dataclasses import dataclass
+from typing import Iterable
 from core.state import GridState
 
 
@@ -24,12 +25,19 @@ class BostonGridModel:
     Tick-driven Boston grid model. Call tick() once per simulation step.
     """
 
-    def __init__(self, config: GridConfig = None):
+    def __init__(
+        self,
+        config: GridConfig = None,
+        trace_source=None,
+        apply_heatwave_to_trace: bool = False,
+    ):
         self.cfg = config or GridConfig()
         self.tick_count = 0
         self.heatwave_active = False
         self.heatwave_ticks_remaining = 0
         self._dc_load_mw = 0.0
+        self.trace_source = trace_source
+        self.apply_heatwave_to_trace = apply_heatwave_to_trace
 
     def start_heatwave(self, duration_ticks: int = 36):
         self.heatwave_active = True
@@ -50,9 +58,35 @@ class BostonGridModel:
             return 1.0
         return self.cfg.heatwave_peak_multiplier
 
+    def _trace_base(self, tick: int) -> float | None:
+        if self.trace_source is None:
+            return None
+
+        if hasattr(self.trace_source, "base_load_mw_for_tick"):
+            return self.trace_source.base_load_mw_for_tick(tick)
+        if callable(self.trace_source):
+            return self.trace_source(tick)
+        raise TypeError(
+            "trace_source must be callable or expose base_load_mw_for_tick(tick)"
+        )
+
     def tick(self) -> GridState:
-        base = self._diurnal_base()
-        mult = self._heatwave_multiplier()
+        simulation_tick = self.tick_count + 1
+        if self.trace_source is None:
+            base = self._diurnal_base()
+            mult = self._heatwave_multiplier()
+        else:
+            trace_base = self._trace_base(simulation_tick)
+            if trace_base is None:
+                raise ValueError(
+                    f"Grid trace has no baseline load for tick {simulation_tick}"
+                )
+            base = trace_base
+            mult = (
+                self._heatwave_multiplier()
+                if self.apply_heatwave_to_trace
+                else 1.0
+            )
         state = GridState(
             base_load_mw=base,
             dc_load_mw=self._dc_load_mw,
@@ -74,6 +108,37 @@ class BostonGridModel:
         if state.total_load_mw < state.threshold_mw * 1.05:
             return "alert"
         return "critical"
+
+
+class RegionalGridTraceSource:
+    """Aggregate regional trace rows into the current scalar grid baseline.
+
+    Rows are expected to expose tick, gridshift_region, and load_mw attributes.
+    The trace is measured baseline load; experimental perturbations such as
+    data-center spikes remain separate in the data-center model.
+    """
+
+    def __init__(self, points: Iterable, selected_regions: set[str] | None = None):
+        self.selected_regions = set(selected_regions) if selected_regions else None
+        self._load_by_tick: dict[int, float] = {}
+
+        for point in points:
+            region = point.gridshift_region
+            if (
+                self.selected_regions is not None
+                and region not in self.selected_regions
+            ):
+                continue
+            tick = int(point.tick)
+            self._load_by_tick[tick] = self._load_by_tick.get(tick, 0.0) + float(
+                point.load_mw
+            )
+
+        if not self._load_by_tick:
+            raise ValueError("RegionalGridTraceSource has no usable trace points")
+
+    def base_load_mw_for_tick(self, tick: int) -> float | None:
+        return self._load_by_tick.get(tick)
 
 
 if __name__ == "__main__":
