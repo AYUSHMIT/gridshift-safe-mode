@@ -96,6 +96,20 @@ python -m experiments.fig_dc
 CSV outputs are written to `experiments/results/` and figures are written to `experiments/figures/`.
 Generated PNG and CSV outputs are reproducibility artifacts and should not be committed unless explicitly needed.
 
+### Trace-calibrated comparison
+
+```bash
+python -m experiments.run_trace_compare
+```
+
+This compares the existing synthetic workload against a trace-calibrated workload sourced from the derived 5-minute trace CSV in `data/traces/`. The trace only calibrates the data-center workload component; it does not replace the ISO-NE regional grid demand.
+
+When evaluating safe-mode policy differences, make sure the trace arrival window overlaps the attack/safe-mode interval. For a short derived trace, shift its first arrival tick without editing the CSV:
+
+```bash
+python -m experiments.run_trace_compare --trace-start-tick 15 --attack-start-tick 15
+```
+
 ## Module tests
 
 ```bash

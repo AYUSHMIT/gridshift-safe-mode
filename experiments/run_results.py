@@ -3,11 +3,9 @@ from __future__ import annotations
 
 import os
 
-from core.config import SimConfig
-from core.orchestrator import GridShiftOrchestrator
-from core.state import TrustLevel
-
 from experiments.metrics import ensure_dir, summarize_runs, write_rows_csv
+from experiments.trial_runner import TrialSpec, run_trial
+from experiments.workloads import SyntheticWorkloadSource
 
 
 SEEDS = list(range(10))
@@ -55,6 +53,11 @@ DETECTOR_COMPARE_CASES = {
     ),
 }
 
+SYNTHETIC_WORKLOAD = SyntheticWorkloadSource(
+    initial_burst=INITIAL_BURST,
+    steady_burst=STEADY_BURST,
+)
+
 
 def _run_trial(
     *,
@@ -65,53 +68,18 @@ def _run_trial(
     seed: int,
     attack_cfg: dict,
 ) -> dict:
-    config_kwargs = {
-        "seed": seed,
-        "policy": policy,
-        "detector_mode": detector_mode,
-    }
-    config_kwargs.update(attack_cfg)
-    cfg = SimConfig(**config_kwargs)
-    orch = GridShiftOrchestrator(seed=seed, config=cfg)
-    orch.trigger_heatwave(TICKS)
-    orch.submit_job_burst(INITIAL_BURST)
-
-    overload_exceedance = 0.0
-    safe_mode_ticks = 0
-    bad_node_ticks = 0
-
-    for t in range(1, TICKS + 1):
-        if t % 5 == 0:
-            orch.submit_job_burst(STEADY_BURST)
-
-        result = orch.tick()
-        overload_exceedance += max(
-            0.0, result.grid.total_load_mw - result.grid.threshold_mw
+    return run_trial(
+        spec=TrialSpec(
+            experiment=experiment,
+            case=case,
+            policy=policy,
+            detector_mode=detector_mode,
+            seed=seed,
+            attack_cfg=attack_cfg,
+            workload_source=SYNTHETIC_WORKLOAD,
+            ticks=TICKS,
         )
-        if result.safe_mode:
-            safe_mode_ticks += 1
-        bad_node_ticks += sum(
-            1 for assessment in result.assessments
-            if assessment.level != TrustLevel.TRUSTED
-        )
-
-    submitted = orch.fleet._job_counter
-    completed = len(orch.fleet.completed)
-    sla = orch.fleet.sla_stats()
-
-    return {
-        "experiment": experiment,
-        "case": case,
-        "policy": policy,
-        "detector_mode": detector_mode,
-        "seed": seed,
-        "overload_exceedance": float(overload_exceedance),
-        "safe_mode_ticks": float(safe_mode_ticks),
-        "bad_node_ticks": float(bad_node_ticks),
-        "migrations": float(orch.fleet.migration_count),
-        "completion_rate": completed / max(1, submitted),
-        "sla_violation_rate": float(sla["sla_violation_rate"]),
-    }
+    )
 
 
 def _group_summary(rows: list[dict], group_fields: list[str]) -> list[dict]:

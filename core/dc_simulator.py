@@ -21,17 +21,19 @@ class DataCenter:
     migration_overhead_mw: float = 0.0   # extra draw per in-flight job (set by fleet)
     running_jobs: List[Job] = field(default_factory=list)
     delayed_jobs: List[Job] = field(default_factory=list)
+    running_load_mw: float = 0.0
+    migrating_jobs_count: int = 0
     # Attack simulation:
     lying: bool = False
     lie_delta_mw: float = 0.0     # positive = under-reports by this much
     spike_mw: float = 0.0         # extra real load (e.g., attacker-controlled)
 
     def true_load_mw(self) -> float:
-        load = sum(j.power_mw for j in self.running_jobs) + self.spike_mw
-        # In-flight (migrating) jobs cost extra: live-copy / network overhead.
-        load += self.migration_overhead_mw * sum(
-            1 for j in self.running_jobs if j.migrating)
-        return load
+        return (
+            self.running_load_mw
+            + self.spike_mw
+            + self.migration_overhead_mw * self.migrating_jobs_count
+        )
 
     def reported_load_mw(self) -> float:
         """What the controller claims. Can lie if compromised."""
@@ -46,6 +48,38 @@ class DataCenter:
 
     def can_accept(self, job: Job) -> bool:
         return self.true_load_mw() + job.power_mw <= self.capacity_mw
+
+    def add_running_job(self, job: Job) -> None:
+        self.running_jobs.append(job)
+        self.running_load_mw += job.power_mw
+        if job.migrating:
+            self.migrating_jobs_count += 1
+
+    def remove_running_job(self, job: Job) -> None:
+        self.running_jobs.remove(job)
+        self.running_load_mw -= job.power_mw
+        if job.migrating:
+            self.migrating_jobs_count -= 1
+
+    def finish_migration(self, job: Job) -> None:
+        if job.migrating:
+            job.migrating = False
+            self.migrating_jobs_count -= 1
+        job.migration_target = None
+
+    def assert_load_cache_valid(self, tolerance: float = 1e-9) -> None:
+        actual_load = sum(j.power_mw for j in self.running_jobs)
+        actual_migrating = sum(1 for j in self.running_jobs if j.migrating)
+        if abs(actual_load - self.running_load_mw) > tolerance:
+            raise AssertionError(
+                f"{self.dc_id} running_load_mw cache mismatch: "
+                f"cached={self.running_load_mw}, actual={actual_load}"
+            )
+        if actual_migrating != self.migrating_jobs_count:
+            raise AssertionError(
+                f"{self.dc_id} migrating_jobs_count cache mismatch: "
+                f"cached={self.migrating_jobs_count}, actual={actual_migrating}"
+            )
 
 
 class DataCenterFleet:
@@ -95,20 +129,49 @@ class DataCenterFleet:
                       JobPriority.MIGRATABLE]
         weights = [0.2, 0.4, 0.4]
         for _ in range(n):
-            self._job_counter += 1
             pri = random.choices(priorities, weights=weights)[0]
-            home = random.choice(list(self.dcs.keys()))
             dur = random.randint(self.cfg.job_dur_min, self.cfg.job_dur_max)
+            self.submit_jobs(
+                [{
+                    "priority": pri,
+                    "power_mw": round(random.uniform(
+                        self.cfg.job_power_min_mw,
+                        self.cfg.job_power_max_mw,
+                    ), 2),
+                    "duration_ticks": dur,
+                }]
+            )
+
+    def submit_jobs(self, job_specs):
+        """Submit explicit experiment-generated job specs."""
+        for spec in job_specs:
+            priority = _spec_value(spec, "priority")
+            power_mw = float(_spec_value(spec, "power_mw"))
+            duration_ticks = int(_spec_value(spec, "duration_ticks"))
+            if duration_ticks <= 0:
+                raise ValueError("Submitted jobs must have positive duration_ticks")
+            if power_mw < 0:
+                raise ValueError("Submitted jobs must have non-negative power_mw")
+
+            if not isinstance(priority, JobPriority):
+                priority = JobPriority(str(priority))
+
+            home = _spec_value(spec, "home_dc", None)
+            if home is None:
+                home = random.choice(list(self.dcs.keys()))
+            if home not in self.dcs:
+                raise ValueError(f"Unknown home_dc for submitted job: {home}")
+
+            self._job_counter += 1
             job = Job(
                 job_id=f"J{self._job_counter:04d}",
-                priority=pri,
-                power_mw=round(random.uniform(
-                    self.cfg.job_power_min_mw, self.cfg.job_power_max_mw), 2),
-                duration_ticks=dur,
+                priority=priority,
+                power_mw=round(power_mw, 2),
+                duration_ticks=duration_ticks,
                 home_dc=home,
                 region=self.dcs[home].region,
                 submit_tick=self.now,
-                base_duration_ticks=dur,
+                base_duration_ticks=duration_ticks,
             )
             self.pending_jobs.append(job)
 
@@ -129,25 +192,39 @@ class DataCenterFleet:
         self.submit_burst(k - 1)
 
     def place_pending(self):
-        """Greedy-place pending jobs in their home DC if possible."""
+        """Greedy-place resumable delayed jobs, then pending jobs."""
+        for dc in self.dcs.values():
+            still_delayed = []
+            for job in dc.delayed_jobs:
+                if job.delayed_until_tick is not None and self.now < job.delayed_until_tick:
+                    still_delayed.append(job)
+                    continue
+                if self._place_job(job):
+                    job.delayed_until_tick = None
+                else:
+                    still_delayed.append(job)
+            dc.delayed_jobs = still_delayed
+
         still_pending = []
         for job in self.pending_jobs:
-            dc = self.dcs[job.home_dc]
-            if dc.can_accept(job):
-                dc.running_jobs.append(job)
-            else:
-                # Try any DC that can accept it
-                placed = False
-                for alt_dc in self.dcs.values():
-                    if alt_dc.can_accept(job):
-                        job.home_dc = alt_dc.dc_id
-                        job.region = alt_dc.region
-                        alt_dc.running_jobs.append(job)
-                        placed = True
-                        break
-                if not placed:
-                    still_pending.append(job)
+            if not self._place_job(job):
+                still_pending.append(job)
         self.pending_jobs = still_pending
+
+    def _place_job(self, job: Job) -> bool:
+        dc = self.dcs[job.home_dc]
+        if dc.can_accept(job):
+            dc.add_running_job(job)
+            return True
+
+        # Try any DC that can accept it
+        for alt_dc in self.dcs.values():
+            if alt_dc.can_accept(job):
+                job.home_dc = alt_dc.dc_id
+                job.region = alt_dc.region
+                alt_dc.add_running_job(job)
+                return True
+        return False
 
     def migrate(self, job_id: str, target_dc_id: str) -> bool:
         """Begin a k-tick migration of job to target_dc.
@@ -165,7 +242,7 @@ class DataCenterFleet:
                     target = self.dcs[target_dc_id]
                     if not target.can_accept(j):
                         return False
-                    dc.running_jobs.remove(j)
+                    dc.remove_running_job(j)
                     j.migration_source = dc.dc_id
                     j.migration_target = target_dc_id
                     j.home_dc = target_dc_id
@@ -173,7 +250,7 @@ class DataCenterFleet:
                     if self.cfg.migration_ticks > 0:
                         j.migrating = True
                         j.migration_remaining = self.cfg.migration_ticks
-                    target.running_jobs.append(j)
+                    target.add_running_job(j)
                     self.migration_count += 1
                     return True
         return False
@@ -182,7 +259,8 @@ class DataCenterFleet:
         for dc in self.dcs.values():
             for j in dc.running_jobs:
                 if j.job_id == job_id and j.priority != JobPriority.CRITICAL:
-                    dc.running_jobs.remove(j)
+                    dc.remove_running_job(j)
+                    j.delayed_until_tick = self.now + max(0, self.cfg.delay_ticks)
                     dc.delayed_jobs.append(j)
                     return True
         return False
@@ -202,12 +280,12 @@ class DataCenterFleet:
                     self.migration_overhead_accum += dc.migration_overhead_mw
                     j.migration_remaining -= 1
                     if j.migration_remaining <= 0:
-                        j.migrating = False
-                        j.migration_target = None
+                        dc.finish_migration(j)
                     still_running.append(j)   # occupies the DC, no progress
                     continue
                 j.duration_ticks -= 1
                 if j.duration_ticks <= 0:
+                    dc.running_load_mw -= j.power_mw
                     j.completed_tick = self.now
                     self.completed.append(j)
                 else:
@@ -237,8 +315,11 @@ class DataCenterFleet:
                    for k, dc in self.dcs.items() if k in ids)
 
     def inflight_count(self) -> int:
-        return sum(1 for dc in self.dcs.values()
-                   for j in dc.running_jobs if j.migrating)
+        return sum(dc.migrating_jobs_count for dc in self.dcs.values())
+
+    def assert_load_caches_valid(self) -> None:
+        for dc in self.dcs.values():
+            dc.assert_load_cache_valid()
 
     def sla_stats(self) -> dict:
         """SLA outcome over completed jobs. A job breaches SLA if it finishes
@@ -282,6 +363,12 @@ class DataCenterFleet:
 
     def clear_spike(self, dc_id: str):
         self.dcs[dc_id].spike_mw = 0.0
+
+
+def _spec_value(spec, key: str, default=None):
+    if isinstance(spec, dict):
+        return spec.get(key, default)
+    return getattr(spec, key, default)
 
 
 if __name__ == "__main__":

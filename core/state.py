@@ -40,6 +40,7 @@ class Job:
     submit_tick: int = 0                   # when the job entered the system
     base_duration_ticks: int = 0           # original runtime, for SLA reference
     completed_tick: Optional[int] = None   # set when retired
+    delayed_until_tick: Optional[int] = None
     # in-flight migration state (k-tick migration cost)
     migrating: bool = False
     migration_remaining: int = 0
