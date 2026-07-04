@@ -1,0 +1,6 @@
+trace_time_us,collection_id,instance_index,cpu_request,priority,latency_sensitive,minute_bucket
+0,100,0,0.45,120,true,0
+60000000,100,1,0.80,115,false,1
+360000000,101,0,0.25,116,false,6
+420000000,101,1,0.60,120,true,7
+720000000,102,0,0.90,99,false,12

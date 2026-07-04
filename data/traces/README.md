@@ -26,7 +26,7 @@ Paper-grade experiments require derived ClusterData2019 summaries generated
 externally from BigQuery. Raw Google ClusterData rows are large and are not
 committed to this repository.
 
-### Preprocessed CSV schema
+### Input format 1: preprocessed task/runtime CSV
 
 `experiments/build_google_cluster_summary.py` expects a local preprocessed CSV
 with one row per runnable task/job attempt. The default column mapping is:
@@ -66,7 +66,48 @@ Alternative inputs are supported with flags:
 - pass an empty optional column name, such as `--latency-column ''`, if that
   field is unavailable and should be treated as all false.
 
-The expected external workflow is:
+### Input format 2: event-sample CSV
+
+`experiments/build_google_event_summary.py` expects a local event-sample CSV
+with one row per sampled instance event. This is useful when the export has
+event timestamps but no instance runtime bounds. The default column mapping is:
+
+```csv
+trace_time_us,collection_id,instance_index,cpu_request,priority,latency_sensitive,minute_bucket
+```
+
+Required by default:
+
+- `trace_time_us`: event timestamp in microseconds. It is converted into
+  5-minute simulator ticks.
+- `cpu_request`: CPU demand or normalized CPU request. If already normalized
+  into `[0, 1]`, pass `--cpu-already-normalized`; otherwise the builder
+  normalizes by the maximum observed value or `--cpu-normalization-max`.
+- `priority`: numeric ClusterData priority. For ClusterData2019, use
+  `--priority-high-threshold 116` for mid+production or `120` for
+  production-only.
+- `latency_sensitive`: boolean-like flag. If no explicit latency label exists,
+  this should be a documented heuristic.
+
+The event-sample builder writes `cpu_demand_norm` as the **mean normalized CPU
+demand per tick**. It does not replay real runtimes. Because event samples do
+not include actual runtime, `duration_p50` and `duration_p90` come from
+configurable defaults:
+
+```bash
+python -m experiments.build_google_event_summary \
+  --input /path/to/google_event_sample.csv \
+  --output data/traces/google_cluster_derived_5min.csv \
+  --cpu-already-normalized \
+  --priority-high-threshold 120 \
+  --default-duration-p50 1 \
+  --default-duration-p90 3
+```
+
+This is event-arrival calibration, not full runtime replay. Do not present it
+as equivalent to the runtime-based preprocessed CSV workflow.
+
+The expected runtime-based external workflow is:
 
 1. Query Google ClusterData2019 task/job tables in BigQuery.
 2. Export a preprocessed task/job CSV with start time, runtime/end time, CPU
@@ -93,6 +134,18 @@ python -m experiments.build_google_cluster_summary \
   --output /tmp/google_cluster_derived_5min.csv \
   --time-unit micros \
   --cpu-already-normalized
+```
+
+The repository also includes a tiny event-sample fixture:
+
+```bash
+python -m experiments.build_google_event_summary \
+  --input data/traces/google_cluster_event_sample.csv \
+  --output /tmp/google_cluster_event_derived_5min.csv \
+  --cpu-already-normalized \
+  --priority-high-threshold 120 \
+  --default-duration-p50 1 \
+  --default-duration-p90 3
 ```
 
 For BigQuery export guidance, see:
@@ -183,6 +236,15 @@ python -m experiments.build_google_cluster_summary \
   --time-unit micros \
   --cpu-already-normalized \
   --priority-high-threshold 120
+
+# Event-sample alternative when runtime bounds are unavailable:
+python -m experiments.build_google_event_summary \
+  --input /path/to/google_event_sample.csv \
+  --output data/traces/google_cluster_derived_5min.csv \
+  --cpu-already-normalized \
+  --priority-high-threshold 120 \
+  --default-duration-p50 1 \
+  --default-duration-p90 3
 
 # 2. Sanity-check the derived workload consumed by GridShift.
 python -m experiments.validate_trace_workload
