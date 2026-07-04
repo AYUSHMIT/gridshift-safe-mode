@@ -171,19 +171,44 @@ maximum. For example, after building a full-horizon ISO-NE grid trace:
 ```bash
 python -m experiments.run_trace_compare \
   --grid-trace-path data/grid/iso_ne_grid_derived_5min.csv \
-  --grid-threshold-headroom-mw 500
+  --experiment-ticks 288 \
+  --grid-threshold-headroom-mw 500 \
+  --grid-threshold-window full
 ```
 
 This sets:
 
 ```text
-grid_threshold_mw = max(trace baseline MW) + 500 MW
-threshold_strategy = max_baseline_plus_headroom
+grid_threshold_mw = max(full loaded trace baseline MW) + 500 MW
+threshold_strategy = max_baseline_plus_headroom_full
 ```
 
 The `500 MW` value is an experimental headroom assumption and should be chosen
-before inspecting policy outcomes. The tiny checked-in fixture is for schema
-checks, not full 50-tick experiments.
+before inspecting policy outcomes. The default threshold window is `full` for
+backward compatibility.
+
+For a shorter experiment window, align simulation tick 1 to a declared grid
+trace tick and decide before the run whether the threshold headroom is
+calibrated from the full trace or only from that evaluated window:
+
+```bash
+python -m experiments.run_trace_compare \
+  --grid-trace-path data/grid/iso_ne_grid_derived_5min.csv \
+  --experiment-ticks 50 \
+  --grid-trace-start-tick 178 \
+  --grid-threshold-headroom-mw 500 \
+  --grid-threshold-window eval
+```
+
+In this example, simulation ticks `1..50` consume grid trace ticks `178..227`,
+and the threshold is `max(evaluated window baseline MW) + 500 MW`. The result
+CSVs report `experiment_ticks`, `grid_eval_first_tick`,
+`grid_eval_last_tick`, `grid_eval_baseline_min_mw`, and
+`grid_eval_baseline_max_mw` so the evaluated window is visible. The workload
+trace alignment option (`--trace-start-tick`) is independent from the grid
+trace alignment option (`--grid-trace-start-tick`).
+
+The tiny checked-in fixture is for schema checks, not full 50-tick experiments.
 
 ## Fixture Check
 
