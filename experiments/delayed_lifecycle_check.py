@@ -22,25 +22,30 @@ def main() -> None:
         submit_tick=fleet.now,
         base_duration_ticks=2,
     )
-    dc.running_jobs.append(job)
+    dc.add_running_job(job)
+    fleet.assert_load_caches_valid()
 
     assert fleet.delay(job.job_id)
+    fleet.assert_load_caches_valid()
     assert len(dc.running_jobs) == 0
     assert len(dc.delayed_jobs) == 1
     assert job.duration_ticks == 2
 
     fleet.tick()
     fleet.place_pending()
+    fleet.assert_load_caches_valid()
     assert len(dc.delayed_jobs) == 1
     assert job.duration_ticks == 2
 
     fleet.tick()
     fleet.place_pending()
+    fleet.assert_load_caches_valid()
     assert len(dc.delayed_jobs) == 0
     assert len(dc.running_jobs) == 1
 
     fleet.tick()
     fleet.tick()
+    fleet.assert_load_caches_valid()
     assert len(fleet.completed) == 1
     assert fleet.completed[0].completed_tick == 4
     assert fleet.sla_stats()["sla_violation_rate"] == 1.0
