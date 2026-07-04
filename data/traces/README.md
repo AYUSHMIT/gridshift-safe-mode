@@ -277,6 +277,14 @@ python -m experiments.validate_trace_workload
 python -m experiments.run_trace_compare
 ```
 
+For policy comparisons, the active trace arrivals should overlap the
+safe-mode interval. If a short derived trace ends before the configured attack,
+shift the trace window in simulation time without changing the CSV:
+
+```bash
+python -m experiments.run_trace_compare --trace-start-tick 15 --attack-start-tick 15
+```
+
 Do not claim paper-grade results unless `google_cluster_derived_5min.csv` was
 generated from a documented ClusterData2019 BigQuery export rather than the
 checked-in development fixture.

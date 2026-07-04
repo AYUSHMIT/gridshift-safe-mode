@@ -30,7 +30,7 @@ class TrialSpec:
     ticks: int
 
 
-def _resolve_workload_jobs(workload_source, tick: int) -> int:
+def _resolve_workload_jobs(workload_source, tick: int):
     if isinstance(
         workload_source,
         (SyntheticWorkloadSource, TraceWorkloadSource, DerivedTraceWorkloadSource),
@@ -39,7 +39,7 @@ def _resolve_workload_jobs(workload_source, tick: int) -> int:
 
     jobs_for_tick = getattr(workload_source, "jobs_for_tick", None)
     if callable(jobs_for_tick):
-        return int(jobs_for_tick(tick))
+        return jobs_for_tick(tick)
 
     raise TypeError(f"Unsupported workload source: {type(workload_source)!r}")
 
@@ -63,10 +63,14 @@ def run_trial(*, spec: TrialSpec) -> dict:
     overload_exceedance = 0.0
     safe_mode_ticks = 0
     bad_node_ticks = 0
+    active_arrival_first_tick = None
+    active_arrival_last_tick = None
 
     for tick in range(1, spec.ticks + 1):
         jobs = _resolve_workload_jobs(workload_source, tick)
         if jobs:
+            active_arrival_first_tick = active_arrival_first_tick or tick
+            active_arrival_last_tick = tick
             if isinstance(jobs, int):
                 orch.submit_job_burst(jobs)
             else:
@@ -101,6 +105,9 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "safe_mode_ticks": float(safe_mode_ticks),
         "bad_node_ticks": float(bad_node_ticks),
         "migrations": float(orch.fleet.migration_count),
+        "attack_start_tick": int(cfg.attack_start_tick),
+        "active_arrival_first_tick": active_arrival_first_tick,
+        "active_arrival_last_tick": active_arrival_last_tick,
         "submitted_jobs": int(submitted),
         "completed_jobs": int(completed),
         "total_submitted_work": float(total_submitted_work),

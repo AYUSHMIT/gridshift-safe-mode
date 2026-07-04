@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import os
+from dataclasses import dataclass
 
 from experiments.metrics import ensure_dir, summarize_runs, write_rows_csv
 from experiments.trial_runner import TrialSpec, run_trial
@@ -40,6 +42,9 @@ METRIC_KEYS = [
     "safe_mode_ticks",
     "bad_node_ticks",
     "migrations",
+    "attack_start_tick",
+    "active_arrival_first_tick",
+    "active_arrival_last_tick",
     "submitted_jobs",
     "completed_jobs",
     "total_submitted_work",
@@ -49,8 +54,65 @@ METRIC_KEYS = [
 ]
 
 
-def _trace_workload(load_scale: float) -> DerivedTraceWorkloadSource:
-    return DerivedTraceWorkloadSource(trace_path=TRACE_PATH, load_scale=load_scale)
+@dataclass
+class AlignedTraceWorkloadSource:
+    """Shift a derived trace in simulation time without editing the CSV.
+
+    Use this when a short derived arrival window needs to overlap the
+    safe-mode interval being evaluated. The default start tick preserves the
+    trace's native timing.
+    """
+
+    source: DerivedTraceWorkloadSource
+    start_tick: int | None = None
+    name: str = "trace-calibrated"
+
+    def __post_init__(self) -> None:
+        points = self.source.load()
+        self.native_first_tick = min(point.tick for point in points)
+        self.native_last_tick = max(point.tick for point in points)
+        if self.start_tick is None:
+            self.start_tick = self.native_first_tick
+        if self.start_tick < 1:
+            raise ValueError("trace_start_tick must be >= 1")
+
+    @property
+    def load_scale(self) -> float:
+        return self.source.load_scale
+
+    def reset(self, seed: int) -> None:
+        self.source.reset(seed)
+
+    def jobs_for_tick(self, tick: int):
+        return self.source.jobs_for_tick(self._native_tick(tick))
+
+    def expected_work_units(self, ticks: int) -> float:
+        total = 0.0
+        for point in self.source.load():
+            aligned_tick = self._aligned_tick(point.tick)
+            if 1 <= aligned_tick <= ticks:
+                total += (
+                    point.arrivals
+                    * self.load_scale
+                    * self.source._power_for_cpu(point.cpu_demand_norm)
+                    * self.source._expected_duration(point)
+                )
+        return total
+
+    def _native_tick(self, aligned_tick: int) -> int:
+        return aligned_tick - int(self.start_tick) + self.native_first_tick
+
+    def _aligned_tick(self, native_tick: int) -> int:
+        return native_tick - self.native_first_tick + int(self.start_tick)
+
+
+def _trace_workload(
+    load_scale: float,
+    *,
+    trace_start_tick: int | None = None,
+) -> AlignedTraceWorkloadSource:
+    source = DerivedTraceWorkloadSource(trace_path=TRACE_PATH, load_scale=load_scale)
+    return AlignedTraceWorkloadSource(source=source, start_tick=trace_start_tick)
 
 
 def _sampled_work_units(source, *, seed: int, ticks: int) -> float:
@@ -65,8 +127,16 @@ def _sampled_work_units(source, *, seed: int, ticks: int) -> float:
     return total
 
 
-def _synthetic_workload(load_scale: float, *, seed: int) -> SyntheticWorkloadSource:
-    trace_units = _trace_workload(load_scale).expected_work_units(TICKS)
+def _synthetic_workload(
+    load_scale: float,
+    *,
+    seed: int,
+    trace_start_tick: int | None,
+) -> SyntheticWorkloadSource:
+    trace_units = _trace_workload(
+        load_scale,
+        trace_start_tick=trace_start_tick,
+    ).expected_work_units(TICKS)
     synthetic_base = SyntheticWorkloadSource(
         initial_burst=INITIAL_BURST,
         steady_burst=STEADY_BURST,
@@ -74,7 +144,7 @@ def _synthetic_workload(load_scale: float, *, seed: int) -> SyntheticWorkloadSou
     synthetic_units = synthetic_base.expected_work_units(TICKS)
     matched_scale = trace_units / synthetic_units if synthetic_units else load_scale
     trace_sampled_units = _sampled_work_units(
-        _trace_workload(load_scale),
+        _trace_workload(load_scale, trace_start_tick=trace_start_tick),
         seed=seed,
         ticks=TICKS,
     )
@@ -93,13 +163,23 @@ def run_workload_trial(
     policy: str,
     seed: int,
     load_scale: float = 1.0,
+    attack_start_tick: int | None = None,
+    trace_start_tick: int | None = None,
 ) -> dict:
     if workload_source == "synthetic":
-        source = _synthetic_workload(load_scale, seed=seed)
+        source = _synthetic_workload(
+            load_scale,
+            seed=seed,
+            trace_start_tick=trace_start_tick,
+        )
     elif workload_source == "trace-calibrated":
-        source = _trace_workload(load_scale)
+        source = _trace_workload(load_scale, trace_start_tick=trace_start_tick)
     else:
         raise ValueError(f"Unknown workload_source: {workload_source}")
+
+    attack_cfg = dict(ATTACK_CFG)
+    if attack_start_tick is not None:
+        attack_cfg["attack_start_tick"] = attack_start_tick
 
     row = run_trial(
         spec=TrialSpec(
@@ -108,7 +188,7 @@ def run_workload_trial(
             policy=policy,
             detector_mode="fusion",
             seed=seed,
-            attack_cfg=ATTACK_CFG,
+            attack_cfg=attack_cfg,
             workload_source=source,
             ticks=TICKS,
         )
@@ -117,6 +197,11 @@ def run_workload_trial(
     row["workload_source"] = workload_source
     row["load_scale"] = load_scale
     row["effective_load_scale"] = float(getattr(source, "load_scale", load_scale))
+    row["trace_start_tick"] = trace_start_tick or getattr(
+        source,
+        "native_first_tick",
+        None,
+    )
     return row
 
 
@@ -181,7 +266,30 @@ def group_summary(rows: list[dict]) -> list[dict]:
     return summary_rows
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Compare synthetic and trace-calibrated GridShift workloads."
+    )
+    parser.add_argument(
+        "--attack-start-tick",
+        type=int,
+        default=ATTACK_CFG["attack_start_tick"],
+        help="Trust attack start tick for this trace_compare run.",
+    )
+    parser.add_argument(
+        "--trace-start-tick",
+        type=int,
+        default=None,
+        help=(
+            "Simulation tick where the first derived trace arrival should occur. "
+            "Defaults to the trace CSV's native first tick."
+        ),
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
     ensure_dir(RESULTS_DIR)
 
     rows: list[dict] = []
@@ -196,6 +304,8 @@ def main() -> None:
                             policy=policy,
                             seed=seed,
                             load_scale=load_scale,
+                            attack_start_tick=args.attack_start_tick,
+                            trace_start_tick=args.trace_start_tick,
                         )
                     )
 
@@ -212,6 +322,9 @@ def main() -> None:
     print("wrote:", raw_csv)
     print("wrote:", summary_csv)
     print("rows:", len(rows))
+    print("attack_start_tick:", args.attack_start_tick)
+    if args.trace_start_tick is not None:
+        print("trace_start_tick:", args.trace_start_tick)
     print(f"max synthetic-vs-trace submitted-work mismatch: {max_mismatch:.2f}%")
 
 
