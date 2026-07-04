@@ -22,9 +22,65 @@ tick,timestamp_utc,gridshift_region,iso_ne_zone,load_mw
 
 ## Builder Input
 
-`experiments/build_iso_ne_grid_summary.py` converts an ISO-NE Five-Minute
-Estimated Zonal Load CSV export into the derived GridShift schema. The source
-CSV column names must be supplied explicitly:
+`experiments/build_iso_ne_grid_summary.py` converts ISO-NE Five-Minute
+Estimated Zonal Load data into the derived GridShift schema. The authoritative
+ISO-NE Web Services endpoint family is:
+
+```text
+https://webservices.iso-ne.com/api/v1.1/fiveminuteestimatedzonalload/
+```
+
+For a historical day, the builder can fetch:
+
+```text
+GET /fiveminuteestimatedzonalload/day/{YYYYMMDD}
+```
+
+using HTTP Basic authentication from environment variables:
+
+```bash
+export ISONE_USERNAME=...
+export ISONE_PASSWORD=...
+
+python -m experiments.build_iso_ne_grid_summary \
+  --fetch-day 20260703 \
+  --output data/grid/iso_ne_grid_derived_5min.csv
+```
+
+Do not commit credentials or full downloaded historical datasets.
+
+The verified JSON response shape is:
+
+```text
+isone_web_services
+  -> five_min_estimated_zonal_loads
+     -> five_min_estimated_zonal_load[]
+```
+
+Each record contains:
+
+- `interval_begin_date`
+- `load_zone_id`
+- `load_zone_name`
+- `estimated_load_mw`
+- `estimated_btm_pv_mw`
+
+The builder uses `estimated_load_mw` as measured baseline load in MW.
+`estimated_btm_pv_mw` is parsed for validation/provenance awareness, but is
+not silently added to or subtracted from load. The data are already at
+five-minute intervals. Timestamps are converted to UTC.
+
+Initially, the JSON path selects only the verified Massachusetts zones:
+
+- `4006` / `.Z.SEMASS` -> `SEMASS`
+- `4007` / `.Z.WCMASS` -> `WCMASS`
+- `4008` / `.Z.NEMASSBOST` -> `NEMASSBOST`
+
+These GridShift labels are aggregate ISO-NE load-zone labels. ISO load zones
+are electrical/load zones, not exact city boundaries.
+
+The builder also retains a CSV mode for saved exports. CSV source column names
+must be supplied explicitly:
 
 ```bash
 python -m experiments.build_iso_ne_grid_summary \
@@ -37,9 +93,9 @@ python -m experiments.build_iso_ne_grid_summary \
   --source-timezone America/New_York
 ```
 
-The builder converts source timestamps to UTC, preserves native 5-minute rows,
-and validates the output with `experiments.grid_trace_loader`. If the source
-CSV is not already at strict 5-minute resolution, the builder fails unless a
+The CSV path converts source timestamps to UTC, preserves native 5-minute rows,
+and validates the output with `experiments.grid_trace_loader`. If the source CSV
+is not already at strict 5-minute resolution, the builder fails unless a
 resampling mode is explicitly requested:
 
 ```bash
@@ -75,6 +131,10 @@ not a historical ISO-NE event and must not be described as one.
 Tiny command fixture:
 
 ```bash
+python -m experiments.build_iso_ne_grid_summary \
+  --json-input data/grid/iso_ne_fiveminute_zonal_load_sample.json \
+  --output /tmp/iso_ne_grid_derived_5min.csv
+
 python -m experiments.build_iso_ne_grid_summary \
   --input data/grid/iso_ne_zonal_load_export_sample.csv \
   --mapping data/grid/iso_ne_zone_mapping_sample.csv \

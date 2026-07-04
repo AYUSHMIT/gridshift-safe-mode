@@ -1,4 +1,4 @@
 gridshift_region,iso_ne_zone,aggregation_weight,rationale
-Boston,NEMA,1.0,NEMA is used as a Boston-area proxy for this fixture.
-Worcester,WCMA,0.56,WCMA is split as a central/western Massachusetts proxy.
-Springfield,WCMA,0.44,WCMA is split as a central/western Massachusetts proxy.
+SEMASS,.Z.SEMASS,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.
+WCMASS,.Z.WCMASS,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.
+NEMASSBOST,.Z.NEMASSBOST,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.

@@ -13,7 +13,11 @@ No overloads are injected and no thresholds are derived here.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
+import json
+import os
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,6 +41,17 @@ MAPPING_COLUMNS = {
     "rationale",
 }
 
+ISONE_ENDPOINT = (
+    "https://webservices.iso-ne.com/api/v1.1/"
+    "fiveminuteestimatedzonalload/day/{day}"
+)
+
+MASSACHUSETTS_ZONE_IDS = {
+    "4006": ("SEMASS", ".Z.SEMASS"),
+    "4007": ("WCMASS", ".Z.WCMASS"),
+    "4008": ("NEMASSBOST", ".Z.NEMASSBOST"),
+}
+
 
 @dataclass(frozen=True)
 class ZoneMapping:
@@ -51,6 +66,8 @@ class SourcePoint:
     timestamp_utc: datetime
     iso_ne_zone: str
     load_mw: float
+    estimated_btm_pv_mw: float | None = None
+    gridshift_region: str | None = None
 
 
 def _parse_timestamp(value: str, source_timezone: ZoneInfo) -> datetime:
@@ -161,6 +178,111 @@ def _load_source_points(
     return sorted(points, key=lambda point: (point.iso_ne_zone, point.timestamp_utc))
 
 
+def _fetch_iso_ne_day(day: str) -> dict:
+    username = os.environ.get("ISONE_USERNAME")
+    password = os.environ.get("ISONE_PASSWORD")
+    if not username or not password:
+        raise ValueError(
+            "Set ISONE_USERNAME and ISONE_PASSWORD to fetch ISO-NE data"
+        )
+    if len(day) != 8 or not day.isdigit():
+        raise ValueError("--fetch-day must use YYYYMMDD format")
+
+    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode(
+        "ascii"
+    )
+    request = urllib.request.Request(
+        ISONE_ENDPOINT.format(day=day),
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Basic {token}",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _load_json_payload(path: str | None, fetch_day: str | None) -> dict:
+    if fetch_day is not None:
+        return _fetch_iso_ne_day(fetch_day)
+    if path is None:
+        raise ValueError("Provide --input, --json-input, or --fetch-day")
+    json_path = Path(path)
+    if not json_path.exists():
+        raise FileNotFoundError(f"JSON input not found: {json_path}")
+    with json_path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _records_from_iso_ne_payload(payload: dict) -> list[dict]:
+    try:
+        records = payload["isone_web_services"][
+            "five_min_estimated_zonal_loads"
+        ]["five_min_estimated_zonal_load"]
+    except KeyError as exc:
+        raise ValueError("JSON payload does not match ISO-NE zonal load shape") from exc
+    if isinstance(records, dict):
+        records = [records]
+    if not isinstance(records, list) or not records:
+        raise ValueError("ISO-NE JSON payload contains no zonal load records")
+    return records
+
+
+def _load_iso_ne_json_points(payload: dict) -> list[SourcePoint]:
+    points: list[SourcePoint] = []
+    for idx, record in enumerate(_records_from_iso_ne_payload(payload), start=1):
+        missing = {
+            "interval_begin_date",
+            "load_zone_id",
+            "load_zone_name",
+            "estimated_load_mw",
+            "estimated_btm_pv_mw",
+        } - set(record)
+        if missing:
+            raise ValueError(f"ISO-NE JSON record {idx} missing fields: {sorted(missing)}")
+
+        zone_id = str(record["load_zone_id"])
+        if zone_id not in MASSACHUSETTS_ZONE_IDS:
+            continue
+        gridshift_region, expected_zone_name = MASSACHUSETTS_ZONE_IDS[zone_id]
+        zone_name = str(record["load_zone_name"]).strip()
+        if zone_name != expected_zone_name:
+            raise ValueError(
+                f"ISO-NE JSON record {idx}: load_zone_id {zone_id} expected "
+                f"{expected_zone_name}, found {zone_name}"
+            )
+
+        try:
+            load_mw = float(record["estimated_load_mw"])
+            btm_pv_mw = float(record["estimated_btm_pv_mw"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"ISO-NE JSON record {idx}: invalid MW value") from exc
+        if load_mw < 0 or btm_pv_mw < 0:
+            raise ValueError(f"ISO-NE JSON record {idx}: negative MW value")
+
+        try:
+            timestamp_utc = _parse_timestamp(
+                str(record["interval_begin_date"]),
+                ZoneInfo("America/New_York"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"ISO-NE JSON record {idx}: {exc}") from exc
+
+        points.append(
+            SourcePoint(
+                timestamp_utc=timestamp_utc,
+                iso_ne_zone=zone_name,
+                load_mw=load_mw,
+                estimated_btm_pv_mw=btm_pv_mw,
+                gridshift_region=gridshift_region,
+            )
+        )
+
+    if not points:
+        raise ValueError("ISO-NE JSON payload has no selected Massachusetts zones")
+    return sorted(points, key=lambda point: (point.iso_ne_zone, point.timestamp_utc))
+
+
 def _require_or_resample_five_minute(
     points: list[SourcePoint],
     *,
@@ -240,54 +362,54 @@ def _timestamp_label(timestamp: datetime) -> str:
 
 def build_iso_ne_grid_summary(
     *,
-    input_path: str,
-    mapping_path: str,
+    input_path: str | None,
+    json_input_path: str | None,
+    fetch_day: str | None,
+    mapping_path: str | None,
     output_path: str,
-    timestamp_column: str,
-    zone_column: str,
-    load_column: str,
-    source_timezone: str,
+    timestamp_column: str | None,
+    zone_column: str | None,
+    load_column: str | None,
+    source_timezone: str | None,
     resample: str = "none",
     start_tick: int = 1,
 ) -> None:
     """Convert ISO-NE zonal load rows into GridShift's grid trace schema."""
     if start_tick < 0:
         raise ValueError("--start-tick must be non-negative")
-    tz = ZoneInfo(source_timezone)
-    mappings = _load_mapping(Path(mapping_path))
-    points = _load_source_points(
-        Path(input_path),
-        timestamp_column=timestamp_column,
-        zone_column=zone_column,
-        load_column=load_column,
-        source_timezone=tz,
+    source_modes = sum(
+        value is not None
+        for value in (input_path, json_input_path, fetch_day)
     )
-    points = _require_or_resample_five_minute(points, resample=resample)
+    if source_modes != 1:
+        raise ValueError("Provide exactly one of --input, --json-input, or --fetch-day")
 
-    mappings_by_zone: dict[str, list[ZoneMapping]] = {}
-    for mapping in mappings:
-        mappings_by_zone.setdefault(mapping.iso_ne_zone, []).append(mapping)
-
-    aggregated: dict[tuple[datetime, str], dict[str, object]] = {}
-    ignored_zones: set[str] = set()
-    for point in points:
-        zone_mappings = mappings_by_zone.get(point.iso_ne_zone)
-        if not zone_mappings:
-            ignored_zones.add(point.iso_ne_zone)
-            continue
-        for mapping in zone_mappings:
-            key = (point.timestamp_utc, mapping.gridshift_region)
-            row = aggregated.setdefault(
-                key,
-                {
-                    "load_mw": 0.0,
-                    "zones": set(),
-                },
+    if json_input_path is not None or fetch_day is not None:
+        payload = _load_json_payload(json_input_path, fetch_day)
+        points = _load_iso_ne_json_points(payload)
+        points = _require_or_resample_five_minute(points, resample=resample)
+        aggregated, ignored_zones = _aggregate_json_points(points)
+    else:
+        if mapping_path is None:
+            raise ValueError("--mapping is required for CSV input")
+        if timestamp_column is None or zone_column is None or load_column is None:
+            raise ValueError(
+                "--timestamp-column, --zone-column, and --load-column are "
+                "required for CSV input"
             )
-            row["load_mw"] = float(row["load_mw"]) + (
-                point.load_mw * mapping.aggregation_weight
-            )
-            row["zones"].add(point.iso_ne_zone)
+        if source_timezone is None:
+            raise ValueError("--source-timezone is required for CSV input")
+        tz = ZoneInfo(source_timezone)
+        mappings = _load_mapping(Path(mapping_path))
+        points = _load_source_points(
+            Path(input_path or ""),
+            timestamp_column=timestamp_column,
+            zone_column=zone_column,
+            load_column=load_column,
+            source_timezone=tz,
+        )
+        points = _require_or_resample_five_minute(points, resample=resample)
+        aggregated, ignored_zones = _aggregate_csv_points(points, mappings)
 
     if not aggregated:
         raise ValueError("No source rows matched the zone mapping CSV")
@@ -330,26 +452,85 @@ def build_iso_ne_grid_summary(
     print("validated_schema:", ",".join(FIELDNAMES))
 
 
+def _aggregate_csv_points(
+    points: list[SourcePoint],
+    mappings: list[ZoneMapping],
+) -> tuple[dict[tuple[datetime, str], dict[str, object]], set[str]]:
+    mappings_by_zone: dict[str, list[ZoneMapping]] = {}
+    for mapping in mappings:
+        mappings_by_zone.setdefault(mapping.iso_ne_zone, []).append(mapping)
+
+    aggregated: dict[tuple[datetime, str], dict[str, object]] = {}
+    ignored_zones: set[str] = set()
+    for point in points:
+        zone_mappings = mappings_by_zone.get(point.iso_ne_zone)
+        if not zone_mappings:
+            ignored_zones.add(point.iso_ne_zone)
+            continue
+        for mapping in zone_mappings:
+            key = (point.timestamp_utc, mapping.gridshift_region)
+            row = aggregated.setdefault(key, {"load_mw": 0.0, "zones": set()})
+            row["load_mw"] = float(row["load_mw"]) + (
+                point.load_mw * mapping.aggregation_weight
+            )
+            row["zones"].add(point.iso_ne_zone)
+    return aggregated, ignored_zones
+
+
+def _aggregate_json_points(
+    points: list[SourcePoint],
+) -> tuple[dict[tuple[datetime, str], dict[str, object]], set[str]]:
+    aggregated: dict[tuple[datetime, str], dict[str, object]] = {}
+    for point in points:
+        if point.gridshift_region is None:
+            raise ValueError("JSON source point missing GridShift region")
+        key = (point.timestamp_utc, point.gridshift_region)
+        if key in aggregated:
+            raise ValueError(f"Duplicate ISO-NE JSON row for {key}")
+        aggregated[key] = {
+            "load_mw": point.load_mw,
+            "zones": {point.iso_ne_zone},
+        }
+    return aggregated, set()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Build a GridShift grid trace from ISO-NE Five-Minute Estimated "
-            "Zonal Load CSV exports."
+            "Zonal Load CSV exports or JSON Web Services responses."
         )
     )
-    parser.add_argument("--input", required=True, help="ISO-NE zonal load CSV.")
-    parser.add_argument("--mapping", required=True, help="Explicit zone mapping CSV.")
+    parser.add_argument("--input", default=None, help="ISO-NE zonal load CSV.")
+    parser.add_argument(
+        "--json-input",
+        default=None,
+        help="Saved ISO-NE Web Services JSON response.",
+    )
+    parser.add_argument(
+        "--fetch-day",
+        default=None,
+        help=(
+            "Fetch /fiveminuteestimatedzonalload/day/{YYYYMMDD}; "
+            "requires ISONE_USERNAME and ISONE_PASSWORD."
+        ),
+    )
+    parser.add_argument(
+        "--mapping",
+        default=None,
+        help="Explicit zone mapping CSV. Required for CSV input.",
+    )
     parser.add_argument(
         "--output",
         default="data/grid/iso_ne_grid_derived_5min.csv",
         help="Derived GridShift grid trace CSV to write.",
     )
-    parser.add_argument("--timestamp-column", required=True)
-    parser.add_argument("--zone-column", required=True)
-    parser.add_argument("--load-column", required=True)
+    parser.add_argument("--timestamp-column", default=None)
+    parser.add_argument("--zone-column", default=None)
+    parser.add_argument("--load-column", default=None)
     parser.add_argument(
         "--source-timezone",
-        required=True,
+        default=None,
         help="IANA timezone for naive source timestamps, e.g. America/New_York.",
     )
     parser.add_argument(
@@ -366,6 +547,8 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     build_iso_ne_grid_summary(
         input_path=args.input,
+        json_input_path=args.json_input,
+        fetch_day=args.fetch_day,
         mapping_path=args.mapping,
         output_path=args.output,
         timestamp_column=args.timestamp_column,

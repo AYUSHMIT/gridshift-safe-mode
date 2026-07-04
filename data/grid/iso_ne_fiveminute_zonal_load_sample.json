@@ -1,0 +1,50 @@
+{
+  "isone_web_services": {
+    "five_min_estimated_zonal_loads": {
+      "five_min_estimated_zonal_load": [
+        {
+          "interval_begin_date": "2026-07-03T00:00:00-04:00",
+          "load_zone_id": 4006,
+          "load_zone_name": ".Z.SEMASS",
+          "estimated_load_mw": 1182.4,
+          "estimated_btm_pv_mw": 0.0
+        },
+        {
+          "interval_begin_date": "2026-07-03T00:00:00-04:00",
+          "load_zone_id": 4007,
+          "load_zone_name": ".Z.WCMASS",
+          "estimated_load_mw": 1044.2,
+          "estimated_btm_pv_mw": 0.0
+        },
+        {
+          "interval_begin_date": "2026-07-03T00:00:00-04:00",
+          "load_zone_id": 4008,
+          "load_zone_name": ".Z.NEMASSBOST",
+          "estimated_load_mw": 1865.1,
+          "estimated_btm_pv_mw": 0.0
+        },
+        {
+          "interval_begin_date": "2026-07-03T00:05:00-04:00",
+          "load_zone_id": 4006,
+          "load_zone_name": ".Z.SEMASS",
+          "estimated_load_mw": 1185.0,
+          "estimated_btm_pv_mw": 0.0
+        },
+        {
+          "interval_begin_date": "2026-07-03T00:05:00-04:00",
+          "load_zone_id": 4007,
+          "load_zone_name": ".Z.WCMASS",
+          "estimated_load_mw": 1048.8,
+          "estimated_btm_pv_mw": 0.0
+        },
+        {
+          "interval_begin_date": "2026-07-03T00:05:00-04:00",
+          "load_zone_id": 4008,
+          "load_zone_name": ".Z.NEMASSBOST",
+          "estimated_load_mw": 1872.3,
+          "estimated_btm_pv_mw": 0.0
+        }
+      ]
+    }
+  }
+}
