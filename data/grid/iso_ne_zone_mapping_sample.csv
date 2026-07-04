@@ -1,0 +1,4 @@
+gridshift_region,iso_ne_zone,aggregation_weight,rationale
+SEMASS,.Z.SEMASS,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.
+WCMASS,.Z.WCMASS,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.
+NEMASSBOST,.Z.NEMASSBOST,1.0,Verified ISO-NE Massachusetts load zone retained as aggregate region.

@@ -28,6 +28,10 @@ class TrialSpec:
     attack_cfg: dict
     workload_source: object
     ticks: int
+    grid_config: object | None = None
+    grid_trace_source: object | None = None
+    apply_heatwave_to_trace: bool = False
+    grid_metadata: dict | None = None
 
 
 def _resolve_workload_jobs(workload_source, tick: int):
@@ -52,7 +56,13 @@ def run_trial(*, spec: TrialSpec) -> dict:
     }
     config_kwargs.update(spec.attack_cfg)
     cfg = SimConfig(**config_kwargs)
-    orch = GridShiftOrchestrator(seed=spec.seed, config=cfg)
+    orch = GridShiftOrchestrator(
+        seed=spec.seed,
+        config=cfg,
+        grid_config=spec.grid_config,
+        grid_trace_source=spec.grid_trace_source,
+        apply_heatwave_to_trace=spec.apply_heatwave_to_trace,
+    )
 
     workload_source = spec.workload_source
     if hasattr(workload_source, "reset"):
@@ -92,7 +102,7 @@ def run_trial(*, spec: TrialSpec) -> dict:
     sla = orch.fleet.sla_stats()
     total_submitted_work = _submitted_work(orch)
 
-    return {
+    row = {
         "experiment": spec.experiment,
         "case": spec.case,
         "workload_source": getattr(spec.workload_source, "name", spec.case),
@@ -105,6 +115,7 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "safe_mode_ticks": float(safe_mode_ticks),
         "bad_node_ticks": float(bad_node_ticks),
         "migrations": float(orch.fleet.migration_count),
+        "experiment_ticks": int(spec.ticks),
         "attack_start_tick": int(cfg.attack_start_tick),
         "active_arrival_first_tick": active_arrival_first_tick,
         "active_arrival_last_tick": active_arrival_last_tick,
@@ -114,6 +125,27 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "completion_rate": completed / max(1, submitted),
         "sla_violation_rate": float(sla["sla_violation_rate"]),
     }
+    row.update(_grid_metadata(orch, spec.grid_metadata))
+    return row
+
+
+def _grid_metadata(orch: GridShiftOrchestrator, metadata: dict | None) -> dict:
+    base = {
+        "grid_threshold_mw": float(orch.grid.cfg.threshold_mw),
+        "grid_baseline_source": "synthetic",
+        "grid_baseline_min_mw": None,
+        "grid_baseline_max_mw": None,
+        "grid_eval_first_tick": None,
+        "grid_eval_last_tick": None,
+        "grid_eval_baseline_min_mw": None,
+        "grid_eval_baseline_max_mw": None,
+        "grid_threshold_window": None,
+        "threshold_strategy": "synthetic_default",
+        "threshold_headroom_mw": None,
+    }
+    if metadata:
+        base.update(metadata)
+    return base
 
 
 def _submitted_work(orch: GridShiftOrchestrator) -> float:
