@@ -14,7 +14,7 @@ Every tick:
 """
 from typing import Optional
 from core.state import TickResult, TrustLevel
-from core.grid_model import BostonGridModel
+from core.grid_model import BostonGridModel, GridConfig
 from core.dc_simulator import DataCenterFleet
 from core.verifier import AttestationVerifier
 from core.prover import Prover
@@ -26,9 +26,20 @@ from core.adversary import configure_adversary
 
 
 class GridShiftOrchestrator:
-    def __init__(self, seed: int = 42, config: Optional[SimConfig] = None):
+    def __init__(
+        self,
+        seed: int = 42,
+        config: Optional[SimConfig] = None,
+        grid_config: Optional[GridConfig] = None,
+        grid_trace_source=None,
+        apply_heatwave_to_trace: bool = False,
+    ):
         self.cfg = config or SimConfig(seed=seed)
-        self.grid = BostonGridModel()
+        self.grid = BostonGridModel(
+            config=grid_config,
+            trace_source=grid_trace_source,
+            apply_heatwave_to_trace=apply_heatwave_to_trace,
+        )
         self.fleet = DataCenterFleet(seed=seed, config=self.cfg)
         self.verifier = AttestationVerifier()
         self.monitor = BehaviorMonitor(detector_mode=self.cfg.detector_mode)

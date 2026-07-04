@@ -140,6 +140,10 @@ class RegionalGridTraceSource:
     def base_load_mw_for_tick(self, tick: int) -> float | None:
         return self._load_by_tick.get(tick)
 
+    def baseline_range_mw(self) -> tuple[float, float]:
+        values = list(self._load_by_tick.values())
+        return min(values), max(values)
+
 
 if __name__ == "__main__":
     # Smoke test

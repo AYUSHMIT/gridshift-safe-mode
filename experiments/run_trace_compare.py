@@ -6,6 +6,8 @@ import argparse
 import os
 from dataclasses import dataclass
 
+from core.grid_model import GridConfig, RegionalGridTraceSource
+from experiments.grid_trace_loader import load_grid_trace
 from experiments.metrics import ensure_dir, summarize_runs, write_rows_csv
 from experiments.trial_runner import TrialSpec, run_trial
 from experiments.workloads import DerivedTraceWorkloadSource, SyntheticWorkloadSource
@@ -42,6 +44,10 @@ METRIC_KEYS = [
     "safe_mode_ticks",
     "bad_node_ticks",
     "migrations",
+    "grid_threshold_mw",
+    "grid_baseline_min_mw",
+    "grid_baseline_max_mw",
+    "threshold_headroom_mw",
     "attack_start_tick",
     "active_arrival_first_tick",
     "active_arrival_last_tick",
@@ -165,6 +171,7 @@ def run_workload_trial(
     load_scale: float = 1.0,
     attack_start_tick: int | None = None,
     trace_start_tick: int | None = None,
+    grid_options: dict | None = None,
 ) -> dict:
     if workload_source == "synthetic":
         source = _synthetic_workload(
@@ -191,6 +198,13 @@ def run_workload_trial(
             attack_cfg=attack_cfg,
             workload_source=source,
             ticks=TICKS,
+            grid_config=(grid_options or {}).get("grid_config"),
+            grid_trace_source=(grid_options or {}).get("grid_trace_source"),
+            apply_heatwave_to_trace=(grid_options or {}).get(
+                "apply_heatwave_to_trace",
+                False,
+            ),
+            grid_metadata=(grid_options or {}).get("grid_metadata"),
         )
     )
 
@@ -203,6 +217,67 @@ def run_workload_trial(
         None,
     )
     return row
+
+
+def _grid_options(args: argparse.Namespace) -> dict:
+    if args.grid_threshold_mw is not None and args.grid_threshold_headroom_mw is not None:
+        raise ValueError(
+            "Use either --grid-threshold-mw or --grid-threshold-headroom-mw, not both"
+        )
+
+    if args.grid_trace_path is None:
+        threshold = args.grid_threshold_mw or 900.0
+        return {
+            "grid_config": GridConfig(threshold_mw=threshold),
+            "grid_trace_source": None,
+            "apply_heatwave_to_trace": False,
+            "grid_metadata": {
+                "grid_threshold_mw": float(threshold),
+                "grid_baseline_source": "synthetic",
+                "grid_baseline_min_mw": None,
+                "grid_baseline_max_mw": None,
+                "threshold_strategy": (
+                    "explicit_override"
+                    if args.grid_threshold_mw is not None
+                    else "synthetic_default"
+                ),
+                "threshold_headroom_mw": None,
+            },
+        }
+
+    points = load_grid_trace(args.grid_trace_path)
+    trace_source = RegionalGridTraceSource(points)
+    baseline_min, baseline_max = trace_source.baseline_range_mw()
+
+    if args.grid_threshold_headroom_mw is not None:
+        threshold = baseline_max + args.grid_threshold_headroom_mw
+        strategy = "max_baseline_plus_headroom"
+        headroom = args.grid_threshold_headroom_mw
+    elif args.grid_threshold_mw is not None:
+        threshold = args.grid_threshold_mw
+        strategy = "explicit_override"
+        headroom = None
+    else:
+        raise ValueError(
+            "Trace-backed grid runs require --grid-threshold-mw or "
+            "--grid-threshold-headroom-mw"
+        )
+
+    return {
+        "grid_config": GridConfig(threshold_mw=threshold),
+        "grid_trace_source": trace_source,
+        "apply_heatwave_to_trace": False,
+        "grid_metadata": {
+            "grid_threshold_mw": float(threshold),
+            "grid_baseline_source": args.grid_trace_path,
+            "grid_baseline_min_mw": float(baseline_min),
+            "grid_baseline_max_mw": float(baseline_max),
+            "threshold_strategy": strategy,
+            "threshold_headroom_mw": (
+                None if headroom is None else float(headroom)
+            ),
+        },
+    }
 
 
 def _add_pair_load_mismatch(rows: list[dict]) -> None:
@@ -254,6 +329,8 @@ def group_summary(rows: list[dict]) -> list[dict]:
             "policy": key[1],
             "detector_mode": key[2],
             "load_scale": key[3],
+            "grid_baseline_source": group_rows[0].get("grid_baseline_source"),
+            "threshold_strategy": group_rows[0].get("threshold_strategy"),
             "n": len(group_rows),
         }
 
@@ -285,12 +362,36 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to the trace CSV's native first tick."
         ),
     )
+    parser.add_argument(
+        "--grid-trace-path",
+        default=None,
+        help=(
+            "Optional derived ISO-NE grid trace. If supplied, the run uses this "
+            "measured baseline instead of the synthetic diurnal baseline."
+        ),
+    )
+    parser.add_argument(
+        "--grid-threshold-mw",
+        type=float,
+        default=None,
+        help="Explicit grid overload threshold in MW.",
+    )
+    parser.add_argument(
+        "--grid-threshold-headroom-mw",
+        type=float,
+        default=None,
+        help=(
+            "For trace-backed runs, set threshold to max baseline plus this "
+            "fixed MW headroom."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     ensure_dir(RESULTS_DIR)
+    grid_options = _grid_options(args)
 
     rows: list[dict] = []
 
@@ -306,6 +407,7 @@ def main(argv: list[str] | None = None) -> None:
                             load_scale=load_scale,
                             attack_start_tick=args.attack_start_tick,
                             trace_start_tick=args.trace_start_tick,
+                            grid_options=grid_options,
                         )
                     )
 
@@ -323,6 +425,8 @@ def main(argv: list[str] | None = None) -> None:
     print("wrote:", summary_csv)
     print("rows:", len(rows))
     print("attack_start_tick:", args.attack_start_tick)
+    print("grid_threshold_mw:", grid_options["grid_metadata"]["grid_threshold_mw"])
+    print("threshold_strategy:", grid_options["grid_metadata"]["threshold_strategy"])
     if args.trace_start_tick is not None:
         print("trace_start_tick:", args.trace_start_tick)
     print(f"max synthetic-vs-trace submitted-work mismatch: {max_mismatch:.2f}%")

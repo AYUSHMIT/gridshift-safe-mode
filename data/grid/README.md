@@ -164,6 +164,27 @@ Thresholds should be explicit experiment parameters. Do not silently derive
 overload thresholds from the maximum observed trace value without documenting a
 scientific rationale.
 
+For trace-backed comparisons, `experiments.run_trace_compare` can set an
+explicit threshold or use a documented fixed headroom above the observed trace
+maximum. For example, after building a full-horizon ISO-NE grid trace:
+
+```bash
+python -m experiments.run_trace_compare \
+  --grid-trace-path data/grid/iso_ne_grid_derived_5min.csv \
+  --grid-threshold-headroom-mw 500
+```
+
+This sets:
+
+```text
+grid_threshold_mw = max(trace baseline MW) + 500 MW
+threshold_strategy = max_baseline_plus_headroom
+```
+
+The `500 MW` value is an experimental headroom assumption and should be chosen
+before inspecting policy outcomes. The tiny checked-in fixture is for schema
+checks, not full 50-tick experiments.
+
 ## Fixture Check
 
 Run:
