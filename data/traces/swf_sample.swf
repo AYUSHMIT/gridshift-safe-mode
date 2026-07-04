@@ -1,0 +1,8 @@
+; Tiny SWF fixture for GridShift builder tests.
+; Fields: job submit wait run alloc_cpu avg_cpu mem req_cpu req_time req_mem status user group exe queue partition prev think
+1 0 0 600 4 -1 -1 4 600 -1 1 10 20 1 1 1 -1 -1
+2 120 0 900 8 -1 -1 8 900 -1 1 11 20 1 1 1 -1 -1
+3 360 0 300 2 -1 -1 4 300 -1 1 12 21 1 1 1 -1 -1
+4 720 0 1800 16 -1 -1 16 1800 -1 1 13 21 1 1 1 -1 -1
+5 900 0 60 1 -1 -1 2 60 -1 1 14 22 1 1 1 -1 -1
+6 1500 0 1200 12 -1 -1 12 1200 -1 1 15 22 1 1 1 -1 -1

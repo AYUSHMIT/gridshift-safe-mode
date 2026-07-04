@@ -127,6 +127,44 @@ python -m experiments.build_google_event_summary \
 This is event-arrival calibration, not full runtime replay. Do not present it
 as equivalent to the runtime-based preprocessed CSV workflow.
 
+### Input format 3: HPC Standard Workload Format
+
+`experiments/build_swf_summary.py` accepts HPC Standard Workload Format (SWF)
+logs with one whitespace-delimited 18-column job record per line. Comment and
+header lines beginning with `;` are ignored. The builder uses the canonical SWF
+fields:
+
+- field 2, `submit_time`: converted from seconds into 5-minute GridShift ticks,
+- field 4, `run_time`: converted into `duration_p50` and `duration_p90`,
+- field 5, `allocated_processors`,
+- field 8, `requested_processors`.
+
+Processor demand is derived from requested processors when available, falling
+back to allocated processors, and is normalized by `--cpu-normalization-max` or
+the maximum observed processor demand in the input. SWF does not include a
+GridShift priority or latency label, so `priority_high_frac` and
+`latency_sensitive_frac` default to `0.0` unless explicit constant fractions are
+provided.
+
+Unlike the Google event-sample path, SWF contains runtime information. That
+makes it useful as a future trace-calibration extension for duration-aware
+workload replay, while still preserving the same derived CSV schema:
+
+```bash
+python -m experiments.build_swf_summary \
+  --input /path/to/workload.swf \
+  --output /tmp/swf_derived_5min.csv
+```
+
+The repository includes only a tiny SWF fixture for command testing. Large real
+SWF traces should stay local or in an external artifact store:
+
+```bash
+python -m experiments.build_swf_summary \
+  --input data/traces/swf_sample.swf \
+  --output /tmp/swf_derived_5min.csv
+```
+
 The expected runtime-based external workflow is:
 
 1. Query Google ClusterData2019 task/job tables in BigQuery.
@@ -167,6 +205,14 @@ python -m experiments.build_google_event_summary \
   --default-duration-p50 1 \
   --default-duration-p90 3 \
   --events-per-job 2
+```
+
+The repository also includes a tiny SWF fixture:
+
+```bash
+python -m experiments.build_swf_summary \
+  --input data/traces/swf_sample.swf \
+  --output /tmp/swf_derived_5min.csv
 ```
 
 For BigQuery export guidance, see:
