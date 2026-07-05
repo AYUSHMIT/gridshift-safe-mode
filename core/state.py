@@ -117,4 +117,8 @@ class TickResult:
     decisions: List[Decision]
     safe_mode: bool
     trapped_load_mw: float = 0.0   # load on untrusted nodes this tick (exposure)
+    migration_candidates_considered: int = 0
+    candidates_with_trusted_feasible_destination: int = 0
+    candidates_blocked_insufficient_destination_capacity: int = 0
+    migration_feasibility_rate: float = 0.0
     timestamp: float = field(default_factory=time.time)

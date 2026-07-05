@@ -13,7 +13,7 @@ Every tick:
   6. Execute the surviving decisions
 """
 from typing import Optional
-from core.state import TickResult, TrustLevel
+from core.state import TickResult, TrustLevel, JobPriority
 from core.grid_model import BostonGridModel, GridConfig
 from core.dc_simulator import DataCenterFleet
 from core.verifier import AttestationVerifier
@@ -89,6 +89,9 @@ class GridShiftOrchestrator:
         # 3. Plan + safety filter (per-node trust map)
         raw_decisions = self.engine.plan(grid_state, self.fleet)
         trust_by_node = {a.node_id: a.level for a in assessments}
+        migration_feasibility = self._migration_feasibility_diagnostics(
+            trust_by_node
+        )
         decisions, safe_mode = self.safety.apply(
             raw_decisions, trust_by_node, self.fleet
         )
@@ -115,7 +118,37 @@ class GridShiftOrchestrator:
             decisions=decisions,
             safe_mode=safe_mode,
             trapped_load_mw=trapped_load_mw,
+            **migration_feasibility,
         )
+
+    def _migration_feasibility_diagnostics(self, trust_by_node: dict) -> dict:
+        candidates = 0
+        feasible = 0
+
+        for src_id, dc in self.fleet.dcs.items():
+            if trust_by_node.get(src_id) == TrustLevel.TRUSTED:
+                continue
+            for job in dc.running_jobs:
+                if job.priority != JobPriority.MIGRATABLE:
+                    continue
+                candidates += 1
+                for target_id, target_dc in self.fleet.dcs.items():
+                    if target_id == src_id:
+                        continue
+                    if trust_by_node.get(target_id) != TrustLevel.TRUSTED:
+                        continue
+                    if target_dc.can_accept(job):
+                        feasible += 1
+                        break
+
+        blocked = candidates - feasible
+        rate = feasible / candidates if candidates else 0.0
+        return {
+            "migration_candidates_considered": candidates,
+            "candidates_with_trusted_feasible_destination": feasible,
+            "candidates_blocked_insufficient_destination_capacity": blocked,
+            "migration_feasibility_rate": rate,
+        }
 
     # ---- Demo controls ----
     def trigger_heatwave(self, ticks: int = 60):

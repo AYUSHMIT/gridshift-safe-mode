@@ -208,11 +208,13 @@ def run_workload_trial(
     workload_source: str,
     policy: str,
     seed: int,
+    experiment: str = "trace_compare",
     load_scale: float = 1.0,
     attack_start_tick: int | None = None,
     trace_start_tick: int | None = None,
     ticks: int = TICKS,
     grid_options: dict | None = None,
+    config_overrides: dict | None = None,
 ) -> dict:
     if workload_source == "synthetic":
         source = _synthetic_workload(
@@ -232,7 +234,7 @@ def run_workload_trial(
 
     row = run_trial(
         spec=TrialSpec(
-            experiment="trace_compare",
+            experiment=experiment,
             case=workload_source,
             policy=policy,
             detector_mode="fusion",
@@ -247,6 +249,7 @@ def run_workload_trial(
                 False,
             ),
             grid_metadata=(grid_options or {}).get("grid_metadata"),
+            config_overrides=config_overrides,
         )
     )
 

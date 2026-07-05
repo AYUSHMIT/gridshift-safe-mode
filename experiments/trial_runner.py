@@ -32,6 +32,7 @@ class TrialSpec:
     grid_trace_source: object | None = None
     apply_heatwave_to_trace: bool = False
     grid_metadata: dict | None = None
+    config_overrides: dict | None = None
 
 
 def _resolve_workload_jobs(workload_source, tick: int):
@@ -55,6 +56,8 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "detector_mode": spec.detector_mode,
     }
     config_kwargs.update(spec.attack_cfg)
+    if spec.config_overrides:
+        config_kwargs.update(spec.config_overrides)
     cfg = SimConfig(**config_kwargs)
     orch = GridShiftOrchestrator(
         seed=spec.seed,
@@ -73,6 +76,8 @@ def run_trial(*, spec: TrialSpec) -> dict:
     overload_exceedance = 0.0
     safe_mode_ticks = 0
     bad_node_ticks = 0
+    migration_candidates_considered = 0
+    candidates_with_trusted_feasible_destination = 0
     active_arrival_first_tick = None
     active_arrival_last_tick = None
 
@@ -96,11 +101,25 @@ def run_trial(*, spec: TrialSpec) -> dict:
             1 for assessment in result.assessments
             if assessment.level != TrustLevel.TRUSTED
         )
+        migration_candidates_considered += result.migration_candidates_considered
+        candidates_with_trusted_feasible_destination += (
+            result.candidates_with_trusted_feasible_destination
+        )
 
     submitted = orch.fleet._job_counter
     completed = len(orch.fleet.completed)
     sla = orch.fleet.sla_stats()
     total_submitted_work = _submitted_work(orch)
+    candidates_blocked_insufficient_destination_capacity = (
+        migration_candidates_considered
+        - candidates_with_trusted_feasible_destination
+    )
+    migration_feasibility_rate = (
+        candidates_with_trusted_feasible_destination
+        / migration_candidates_considered
+        if migration_candidates_considered
+        else 0.0
+    )
 
     row = {
         "experiment": spec.experiment,
@@ -115,6 +134,14 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "safe_mode_ticks": float(safe_mode_ticks),
         "bad_node_ticks": float(bad_node_ticks),
         "migrations": float(orch.fleet.migration_count),
+        "migration_candidates_considered": int(migration_candidates_considered),
+        "candidates_with_trusted_feasible_destination": int(
+            candidates_with_trusted_feasible_destination
+        ),
+        "candidates_blocked_insufficient_destination_capacity": int(
+            candidates_blocked_insufficient_destination_capacity
+        ),
+        "migration_feasibility_rate": float(migration_feasibility_rate),
         "experiment_ticks": int(spec.ticks),
         "attack_start_tick": int(cfg.attack_start_tick),
         "active_arrival_first_tick": active_arrival_first_tick,
