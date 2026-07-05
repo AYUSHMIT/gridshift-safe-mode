@@ -44,6 +44,10 @@ METRIC_KEYS = [
     "safe_mode_ticks",
     "bad_node_ticks",
     "migrations",
+    "migration_candidates_considered",
+    "candidates_with_trusted_feasible_destination",
+    "candidates_blocked_insufficient_destination_capacity",
+    "migration_feasibility_rate",
     "experiment_ticks",
     "grid_threshold_mw",
     "grid_baseline_min_mw",
@@ -155,9 +159,33 @@ def _trace_workload(
     load_scale: float,
     *,
     trace_start_tick: int | None = None,
+    trace_path: str = TRACE_PATH,
+    name: str = "trace-calibrated",
 ) -> AlignedTraceWorkloadSource:
-    source = DerivedTraceWorkloadSource(trace_path=TRACE_PATH, load_scale=load_scale)
-    return AlignedTraceWorkloadSource(source=source, start_tick=trace_start_tick)
+    source = DerivedTraceWorkloadSource(
+        trace_path=trace_path,
+        load_scale=load_scale,
+        name=name,
+    )
+    return AlignedTraceWorkloadSource(
+        source=source,
+        start_tick=trace_start_tick,
+        name=name,
+    )
+
+
+def _hpc_swf_workload(
+    swf_derived_path: str,
+    load_scale: float,
+    *,
+    trace_start_tick: int | None = None,
+) -> AlignedTraceWorkloadSource:
+    return _trace_workload(
+        load_scale,
+        trace_start_tick=trace_start_tick,
+        trace_path=swf_derived_path,
+        name="hpc-swf",
+    )
 
 
 def _sampled_work_units(source, *, seed: int, ticks: int) -> float:
@@ -215,6 +243,7 @@ def run_workload_trial(
     ticks: int = TICKS,
     grid_options: dict | None = None,
     config_overrides: dict | None = None,
+    swf_derived_path: str | None = None,
 ) -> dict:
     if workload_source == "synthetic":
         source = _synthetic_workload(
@@ -225,6 +254,14 @@ def run_workload_trial(
         )
     elif workload_source == "trace-calibrated":
         source = _trace_workload(load_scale, trace_start_tick=trace_start_tick)
+    elif workload_source == "hpc-swf":
+        if swf_derived_path is None:
+            raise ValueError("workload_source='hpc-swf' requires swf_derived_path")
+        source = _hpc_swf_workload(
+            swf_derived_path,
+            load_scale,
+            trace_start_tick=trace_start_tick,
+        )
     else:
         raise ValueError(f"Unknown workload_source: {workload_source}")
 
