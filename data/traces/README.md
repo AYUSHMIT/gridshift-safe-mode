@@ -163,6 +163,11 @@ python -m experiments.build_swf_summary \
   --output /tmp/swf_derived_5min.csv
 ```
 
+For real workload experiments, download canonical `.swf` traces locally from
+the Parallel Workloads Archive or another public SWF source, then point the
+builder or workflow helper at that local path. Do not commit downloaded SWF
+traces or derived real-trace CSV outputs to this repository.
+
 To run the narrow SWF policy comparison:
 
 ```bash
