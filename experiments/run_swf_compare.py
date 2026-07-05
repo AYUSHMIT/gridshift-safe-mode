@@ -31,6 +31,8 @@ def group_summary(rows: list[dict]) -> list[dict]:
             row["policy"],
             row["detector_mode"],
             row["swf_derived_path"],
+            row["swf_trace_start_tick"],
+            row["swf_simulation_start_tick"],
         )
         grouped.setdefault(key, []).append(row)
 
@@ -49,6 +51,8 @@ def group_summary(rows: list[dict]) -> list[dict]:
             "policy": key[1],
             "detector_mode": key[2],
             "swf_derived_path": key[3],
+            "swf_trace_start_tick": key[4],
+            "swf_simulation_start_tick": key[5],
             "grid_baseline_source": group_rows[0].get("grid_baseline_source"),
             "threshold_strategy": group_rows[0].get("threshold_strategy"),
             "grid_threshold_window": group_rows[0].get("grid_threshold_window"),
@@ -89,12 +93,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Trust attack start tick.",
     )
     parser.add_argument(
-        "--trace-start-tick",
+        "--swf-trace-start-tick",
         type=int,
         default=None,
         help=(
-            "Simulation tick where the first SWF-derived arrival should occur. "
-            "Defaults to the derived CSV's native first tick."
+            "Native/source tick in the SWF-derived CSV where the selected "
+            "workload window begins. Defaults to the derived CSV's first tick."
+        ),
+    )
+    parser.add_argument(
+        "--swf-simulation-start-tick",
+        type=int,
+        default=1,
+        help=(
+            "Simulation tick where --swf-trace-start-tick should be aligned. "
+            "Defaults to 1."
         ),
     )
     parser.add_argument(
@@ -138,11 +151,13 @@ def main(argv: list[str] | None = None) -> None:
                 policy=policy,
                 seed=seed,
                 attack_start_tick=args.attack_start_tick,
-                trace_start_tick=args.trace_start_tick,
                 ticks=args.experiment_ticks,
                 grid_options=grid_options,
                 swf_derived_path=args.swf_derived_path,
+                swf_trace_start_tick=args.swf_trace_start_tick,
+                swf_simulation_start_tick=args.swf_simulation_start_tick,
             )
+            _validate_nonempty_workload(row)
             row["swf_derived_path"] = args.swf_derived_path
             rows.append(row)
 
@@ -157,6 +172,11 @@ def main(argv: list[str] | None = None) -> None:
     print("attack_start_tick:", args.attack_start_tick)
     print("experiment_ticks:", args.experiment_ticks)
     print("swf_derived_path:", args.swf_derived_path)
+    print("swf_trace_start_tick:", rows[0]["swf_trace_start_tick"] if rows else None)
+    print(
+        "swf_simulation_start_tick:",
+        rows[0]["swf_simulation_start_tick"] if rows else None,
+    )
     print("grid_threshold_mw:", grid_options["grid_metadata"]["grid_threshold_mw"])
     print("grid_trace_start_tick:", args.grid_trace_start_tick)
     print(
@@ -167,6 +187,21 @@ def main(argv: list[str] | None = None) -> None:
     print(
         "grid_threshold_window:",
         grid_options["grid_metadata"]["grid_threshold_window"],
+    )
+
+
+def _validate_nonempty_workload(row: dict) -> None:
+    if row["submitted_jobs"] > 0 and row["total_submitted_work"] > 0:
+        return
+    raise RuntimeError(
+        "Selected SWF window did not overlap active simulation ticks: "
+        f"swf_trace_start_tick={row.get('swf_trace_start_tick')}, "
+        f"swf_simulation_start_tick={row.get('swf_simulation_start_tick')}, "
+        f"experiment_ticks={row.get('experiment_ticks')}, "
+        f"submitted_jobs={row.get('submitted_jobs')}, "
+        f"total_submitted_work={row.get('total_submitted_work')}. "
+        "Choose a native SWF tick with arrivals or adjust the simulation "
+        "alignment tick."
     )
 
 

@@ -88,7 +88,11 @@ def _load_swf_jobs(path: Path) -> list[SwfJob]:
                     f"{path}:{lineno}: submit_time must be non-negative"
                 )
             if runtime_seconds <= 0:
-                raise ValueError(f"{path}:{lineno}: run_time must be positive")
+                # Production SWF traces sometimes contain canceled or malformed
+                # records with non-positive runtime. They cannot be replayed as
+                # executable GridShift jobs, so skip them instead of failing the
+                # whole trace conversion.
+                continue
 
             processor_demand = (
                 requested_processors

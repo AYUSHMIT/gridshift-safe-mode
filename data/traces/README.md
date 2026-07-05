@@ -168,13 +168,33 @@ the Parallel Workloads Archive or another public SWF source, then point the
 builder or workflow helper at that local path. Do not commit downloaded SWF
 traces or derived real-trace CSV outputs to this repository.
 
-To run the narrow SWF policy comparison:
+To run a narrow SWF policy comparison on the tiny fixture-derived CSV:
 
 ```bash
 python -m experiments.run_swf_compare \
   --swf-derived-path /tmp/swf_derived_5min.csv \
   --seeds 0 \
+  --swf-trace-start-tick 1 \
+  --swf-simulation-start-tick 1 \
   --grid-trace-path data/grid/iso_ne_grid_derived_5min.csv
+```
+
+`--swf-trace-start-tick` is a native/source tick from the SWF-derived workload
+CSV. `--swf-simulation-start-tick` is the GridShift simulation tick where that
+source workload window is placed. For example, if a real SWF-derived trace has
+its first active arrival at native tick `1436`, passing
+`--swf-trace-start-tick 1436 --swf-simulation-start-tick 1` maps that arrival to
+simulation tick `1` while leaving the derived CSV unchanged. The ISO-NE grid
+trace uses its own separate `--grid-trace-start-tick`; do not use the grid
+alignment flag to select a workload window.
+
+For a local real SWF trace, the helper builds the temporary derived CSV, chooses
+the first active native workload tick by default, aligns it to simulation tick
+`1`, and runs the standard three-policy comparison across seeds `0..9`:
+
+```bash
+python -m experiments.run_real_swf_workflow \
+  --swf-path /path/to/SDSC-BLUE-2000-4.2-cln.swf
 ```
 
 The expected runtime-based external workflow is:

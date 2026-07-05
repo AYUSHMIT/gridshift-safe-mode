@@ -74,22 +74,33 @@ class AlignedTraceWorkloadSource:
     """Shift a derived trace in simulation time without editing the CSV.
 
     Use this when a short derived arrival window needs to overlap the
-    safe-mode interval being evaluated. The default start tick preserves the
-    trace's native timing.
+    safe-mode interval being evaluated. By default the first native trace tick
+    maps to the same simulation tick, preserving the trace's native timing.
     """
 
     source: DerivedTraceWorkloadSource
     start_tick: int | None = None
+    source_start_tick: int | None = None
+    simulation_start_tick: int | None = None
     name: str = "trace-calibrated"
 
     def __post_init__(self) -> None:
         points = self.source.load()
         self.native_first_tick = min(point.tick for point in points)
         self.native_last_tick = max(point.tick for point in points)
-        if self.start_tick is None:
-            self.start_tick = self.native_first_tick
-        if self.start_tick < 1:
+        if self.source_start_tick is None:
+            self.source_start_tick = self.native_first_tick
+        if self.source_start_tick < 1:
+            raise ValueError("source_start_tick must be >= 1")
+        if self.simulation_start_tick is None:
+            self.simulation_start_tick = (
+                self.start_tick
+                if self.start_tick is not None
+                else self.native_first_tick
+            )
+        if self.simulation_start_tick < 1:
             raise ValueError("trace_start_tick must be >= 1")
+        self.start_tick = self.simulation_start_tick
 
     @property
     def load_scale(self) -> float:
@@ -115,10 +126,18 @@ class AlignedTraceWorkloadSource:
         return total
 
     def _native_tick(self, aligned_tick: int) -> int:
-        return aligned_tick - int(self.start_tick) + self.native_first_tick
+        return (
+            aligned_tick
+            - int(self.simulation_start_tick)
+            + int(self.source_start_tick)
+        )
 
     def _aligned_tick(self, native_tick: int) -> int:
-        return native_tick - self.native_first_tick + int(self.start_tick)
+        return (
+            native_tick
+            - int(self.source_start_tick)
+            + int(self.simulation_start_tick)
+        )
 
 
 @dataclass
@@ -159,6 +178,8 @@ def _trace_workload(
     load_scale: float,
     *,
     trace_start_tick: int | None = None,
+    source_start_tick: int | None = None,
+    simulation_start_tick: int | None = None,
     trace_path: str = TRACE_PATH,
     name: str = "trace-calibrated",
 ) -> AlignedTraceWorkloadSource:
@@ -170,6 +191,8 @@ def _trace_workload(
     return AlignedTraceWorkloadSource(
         source=source,
         start_tick=trace_start_tick,
+        source_start_tick=source_start_tick,
+        simulation_start_tick=simulation_start_tick,
         name=name,
     )
 
@@ -178,11 +201,13 @@ def _hpc_swf_workload(
     swf_derived_path: str,
     load_scale: float,
     *,
-    trace_start_tick: int | None = None,
+    swf_trace_start_tick: int | None = None,
+    swf_simulation_start_tick: int | None = 1,
 ) -> AlignedTraceWorkloadSource:
     return _trace_workload(
         load_scale,
-        trace_start_tick=trace_start_tick,
+        source_start_tick=swf_trace_start_tick,
+        simulation_start_tick=swf_simulation_start_tick,
         trace_path=swf_derived_path,
         name="hpc-swf",
     )
@@ -244,6 +269,8 @@ def run_workload_trial(
     grid_options: dict | None = None,
     config_overrides: dict | None = None,
     swf_derived_path: str | None = None,
+    swf_trace_start_tick: int | None = None,
+    swf_simulation_start_tick: int | None = 1,
 ) -> dict:
     if workload_source == "synthetic":
         source = _synthetic_workload(
@@ -260,7 +287,8 @@ def run_workload_trial(
         source = _hpc_swf_workload(
             swf_derived_path,
             load_scale,
-            trace_start_tick=trace_start_tick,
+            swf_trace_start_tick=swf_trace_start_tick,
+            swf_simulation_start_tick=swf_simulation_start_tick,
         )
     else:
         raise ValueError(f"Unknown workload_source: {workload_source}")
@@ -298,6 +326,13 @@ def run_workload_trial(
         "native_first_tick",
         None,
     )
+    if workload_source == "hpc-swf":
+        row["swf_trace_start_tick"] = int(getattr(source, "source_start_tick"))
+        row["swf_simulation_start_tick"] = int(
+            getattr(source, "simulation_start_tick")
+        )
+        row["swf_native_first_tick"] = int(getattr(source, "native_first_tick"))
+        row["swf_native_last_tick"] = int(getattr(source, "native_last_tick"))
     return row
 
 
