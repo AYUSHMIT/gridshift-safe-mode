@@ -127,6 +127,51 @@ python -m experiments.build_google_event_summary \
 This is event-arrival calibration, not full runtime replay. Do not present it
 as equivalent to the runtime-based preprocessed CSV workflow.
 
+### Input format 3: HPC Standard Workload Format
+
+`experiments/build_swf_summary.py` accepts HPC Standard Workload Format (SWF)
+logs with whitespace-delimited job records. Comment and header lines beginning
+with `;` are ignored. The builder uses the canonical SWF fields:
+
+- field 2, `submit_time`: converted from seconds into 5-minute GridShift ticks,
+- field 4, `run_time`: converted into duration summary fields,
+- field 5, `allocated_processors`,
+- field 8, `requested_processors`.
+
+Processor demand uses requested processors when positive, otherwise allocated
+processors. It is normalized by `--cpu-normalization-max` when supplied, or by
+the maximum observed processor demand in the input. SWF does not include
+GridShift priority or latency labels, so `priority_high_frac` and
+`latency_sensitive_frac` default to `0.0` unless constant fractions are
+provided on the CLI.
+
+The builder emits the same derived workload schema consumed by the
+trace-calibrated path:
+
+```bash
+python -m experiments.build_swf_summary \
+  --input /path/to/workload.swf \
+  --output /tmp/swf_derived_5min.csv
+```
+
+The repository includes only a tiny SWF fixture for command testing. Large real
+SWF traces should stay local or in an external artifact store:
+
+```bash
+python -m experiments.build_swf_summary \
+  --input data/traces/swf_sample.swf \
+  --output /tmp/swf_derived_5min.csv
+```
+
+To run the narrow SWF policy comparison:
+
+```bash
+python -m experiments.run_swf_compare \
+  --swf-derived-path /tmp/swf_derived_5min.csv \
+  --seeds 0 \
+  --grid-trace-path data/grid/iso_ne_grid_derived_5min.csv
+```
+
 The expected runtime-based external workflow is:
 
 1. Query Google ClusterData2019 task/job tables in BigQuery.
