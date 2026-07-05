@@ -13,7 +13,7 @@ Every tick:
   6. Execute the surviving decisions
 """
 from typing import Optional
-from core.state import TickResult, TrustLevel, JobPriority
+from core.state import TickResult, TrustLevel, JobPriority, ActionType
 from core.grid_model import BostonGridModel, GridConfig
 from core.dc_simulator import DataCenterFleet
 from core.verifier import AttestationVerifier
@@ -92,16 +92,44 @@ class GridShiftOrchestrator:
         migration_feasibility = self._migration_feasibility_diagnostics(
             trust_by_node
         )
+        actuation_diagnostics = self._actuation_diagnostics_before_safety(
+            raw_decisions,
+            trust_by_node,
+            grid_state,
+        )
         decisions, safe_mode = self.safety.apply(
             raw_decisions, trust_by_node, self.fleet
         )
+        actuation_diagnostics.update(
+            self._actuation_diagnostics_after_safety(raw_decisions, decisions)
+        )
 
         # 4. Execute non-blocked decisions
+        executed_migrations_this_tick = 0
+        executed_corrective_migrations_this_tick = 0
         for d in decisions:
             if d.action.value == "delay":
                 self.fleet.delay(d.job_id)
             elif d.action.value == "migrate" and d.target_dc:
-                self.fleet.migrate(d.job_id, d.target_dc)
+                migrated = self.fleet.migrate(d.job_id, d.target_dc)
+                if migrated:
+                    executed_migrations_this_tick += 1
+                    # Empirical corrective-action proxy: successful migrations
+                    # that drain untrusted sources, originate from observed-load
+                    # unwind logic, or occur while the grid threshold is already
+                    # exceeded. This observes behavior; it does not prove cause.
+                    if (
+                        trust_by_node.get(d.source_dc) != TrustLevel.TRUSTED
+                        or "UNWIND:" in d.reason
+                        or actuation_diagnostics["grid_threshold_exceeded"]
+                    ):
+                        executed_corrective_migrations_this_tick += 1
+        actuation_diagnostics["executed_migrations_this_tick"] = (
+            executed_migrations_this_tick
+        )
+        actuation_diagnostics["executed_corrective_migrations_this_tick"] = (
+            executed_corrective_migrations_this_tick
+        )
 
         # 4b. Measure exposure: load left on untrusted nodes after mitigation.
         bad_nodes = {n for n, lvl in trust_by_node.items()
@@ -119,6 +147,7 @@ class GridShiftOrchestrator:
             safe_mode=safe_mode,
             trapped_load_mw=trapped_load_mw,
             **migration_feasibility,
+            **actuation_diagnostics,
         )
 
     def _migration_feasibility_diagnostics(self, trust_by_node: dict) -> dict:
@@ -149,6 +178,100 @@ class GridShiftOrchestrator:
             "candidates_blocked_insufficient_destination_capacity": blocked,
             "migration_feasibility_rate": rate,
         }
+
+    def _actuation_diagnostics_before_safety(
+        self,
+        raw_decisions: list,
+        trust_by_node: dict,
+        grid_state,
+    ) -> dict:
+        raw_migrations = [
+            decision
+            for decision in raw_decisions
+            if decision.action == ActionType.MIGRATE
+        ]
+        trusted_capacity_feasible = 0
+        for decision in raw_migrations:
+            if decision.target_dc is None:
+                continue
+            if trust_by_node.get(decision.target_dc) != TrustLevel.TRUSTED:
+                continue
+            target = self.fleet.dcs.get(decision.target_dc)
+            job = self._running_job(decision.job_id)
+            if target is not None and job is not None and target.can_accept(job):
+                trusted_capacity_feasible += 1
+
+        # Keep this consistent with DataCenter.can_accept(), which is based on
+        # true load rather than reported/attested load.
+        trusted_headroom = 0.0
+        trusted_destinations = 0
+        for dc_id, dc in self.fleet.dcs.items():
+            if trust_by_node.get(dc_id) != TrustLevel.TRUSTED:
+                continue
+            residual = max(0.0, dc.capacity_mw - dc.true_load_mw())
+            trusted_headroom += residual
+            if residual > 0:
+                trusted_destinations += 1
+
+        return {
+            "trusted_residual_headroom_mw": float(trusted_headroom),
+            "trusted_destinations_with_positive_headroom": int(
+                trusted_destinations
+            ),
+            "scheduler_migration_decisions_raw": len(raw_migrations),
+            "scheduler_migration_decisions_to_trusted_capacity_feasible": (
+                trusted_capacity_feasible
+            ),
+            "grid_threshold_exceeded": (
+                grid_state.total_load_mw > grid_state.threshold_mw
+            ),
+        }
+
+    def _actuation_diagnostics_after_safety(
+        self,
+        raw_decisions: list,
+        decisions: list,
+    ) -> dict:
+        safety_allowed_migrations = sum(
+            1 for decision in decisions
+            if decision.action == ActionType.MIGRATE
+        )
+        allowed_raw_migration_keys = {
+            (decision.job_id, decision.source_dc, decision.target_dc)
+            for decision in decisions
+            if decision.action == ActionType.MIGRATE
+        }
+        raw_migration_keys = {
+            (decision.job_id, decision.source_dc, decision.target_dc)
+            for decision in raw_decisions
+            if decision.action == ActionType.MIGRATE
+        }
+        converted_or_removed_migrations = len(
+            raw_migration_keys - allowed_raw_migration_keys
+        )
+        explicit_blocks = sum(
+            1 for decision in decisions
+            if decision.action == ActionType.BLOCK
+        )
+        return {
+            "safety_allowed_migrations": safety_allowed_migrations,
+            "safety_explicit_block_migrations": explicit_blocks,
+            "safety_raw_migrations_removed_or_converted": (
+                converted_or_removed_migrations
+            ),
+            # Compatibility alias: raw scheduler migrations that did not remain
+            # allowed migrations after safety filtering. Explicit BLOCK
+            # decisions are often the representation of the same removed raw
+            # migration, so summing both fields would double-count those cases.
+            "safety_blocked_migrations": converted_or_removed_migrations,
+        }
+
+    def _running_job(self, job_id: str):
+        for dc in self.fleet.dcs.values():
+            for job in dc.running_jobs:
+                if job.job_id == job_id:
+                    return job
+        return None
 
     # ---- Demo controls ----
     def trigger_heatwave(self, ticks: int = 60):

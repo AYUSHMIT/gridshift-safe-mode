@@ -121,4 +121,15 @@ class TickResult:
     candidates_with_trusted_feasible_destination: int = 0
     candidates_blocked_insufficient_destination_capacity: int = 0
     migration_feasibility_rate: float = 0.0
+    trusted_residual_headroom_mw: float = 0.0
+    trusted_destinations_with_positive_headroom: int = 0
+    scheduler_migration_decisions_raw: int = 0
+    scheduler_migration_decisions_to_trusted_capacity_feasible: int = 0
+    safety_allowed_migrations: int = 0
+    safety_explicit_block_migrations: int = 0
+    safety_raw_migrations_removed_or_converted: int = 0
+    safety_blocked_migrations: int = 0
+    executed_migrations_this_tick: int = 0
+    executed_corrective_migrations_this_tick: int = 0
+    grid_threshold_exceeded: bool = False
     timestamp: float = field(default_factory=time.time)

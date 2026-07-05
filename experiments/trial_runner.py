@@ -80,6 +80,7 @@ def run_trial(*, spec: TrialSpec) -> dict:
     candidates_with_trusted_feasible_destination = 0
     active_arrival_first_tick = None
     active_arrival_last_tick = None
+    post_attack_results = []
 
     for tick in range(1, spec.ticks + 1):
         jobs = _resolve_workload_jobs(workload_source, tick)
@@ -105,6 +106,8 @@ def run_trial(*, spec: TrialSpec) -> dict:
         candidates_with_trusted_feasible_destination += (
             result.candidates_with_trusted_feasible_destination
         )
+        if tick >= int(cfg.attack_start_tick):
+            post_attack_results.append(result)
 
     submitted = orch.fleet._job_counter
     completed = len(orch.fleet.completed)
@@ -119,6 +122,10 @@ def run_trial(*, spec: TrialSpec) -> dict:
         / migration_candidates_considered
         if migration_candidates_considered
         else 0.0
+    )
+    post_attack_summary = _post_attack_actuation_summary(
+        post_attack_results,
+        attack_start_tick=int(cfg.attack_start_tick),
     )
 
     row = {
@@ -152,8 +159,105 @@ def run_trial(*, spec: TrialSpec) -> dict:
         "completion_rate": completed / max(1, submitted),
         "sla_violation_rate": float(sla["sla_violation_rate"]),
     }
+    row.update(post_attack_summary)
     row.update(_grid_metadata(orch, spec.grid_metadata))
     return row
+
+
+def _post_attack_actuation_summary(results: list, *, attack_start_tick: int) -> dict:
+    """Summarize post-attack TCAE observations.
+
+    time_to_first_feasible_corrective_action uses -1 when no post-attack tick
+    has a trusted compute-feasible destination for an untrusted-source job.
+    """
+    if not results:
+        return {
+            "post_attack_mean_migration_feasibility_rate": 0.0,
+            "post_attack_fraction_ticks_with_any_feasible_trusted_destination": 0.0,
+            "post_attack_mean_trusted_residual_headroom_mw": 0.0,
+            "post_attack_min_trusted_residual_headroom_mw": 0.0,
+            "post_attack_mean_trusted_destinations_with_positive_headroom": 0.0,
+            "time_to_first_feasible_corrective_action": -1,
+            "successful_corrective_migrations": 0,
+            "post_attack_scheduler_migration_decisions_raw": 0,
+            "post_attack_scheduler_migration_decisions_to_trusted_capacity_feasible": 0,
+            "post_attack_safety_allowed_migrations": 0,
+            "post_attack_safety_explicit_block_migrations": 0,
+            "post_attack_safety_raw_migrations_removed_or_converted": 0,
+            "post_attack_safety_blocked_migrations": 0,
+            "post_attack_executed_migrations": 0,
+            "post_attack_executed_corrective_migrations": 0,
+        }
+
+    first_feasible_tick = None
+    for result in results:
+        if result.candidates_with_trusted_feasible_destination > 0:
+            first_feasible_tick = result.tick
+            break
+
+    return {
+        "post_attack_mean_migration_feasibility_rate": _mean(
+            result.migration_feasibility_rate for result in results
+        ),
+        "post_attack_fraction_ticks_with_any_feasible_trusted_destination": (
+            sum(
+                1 for result in results
+                if result.candidates_with_trusted_feasible_destination > 0
+            )
+            / len(results)
+        ),
+        "post_attack_mean_trusted_residual_headroom_mw": _mean(
+            result.trusted_residual_headroom_mw for result in results
+        ),
+        "post_attack_min_trusted_residual_headroom_mw": min(
+            result.trusted_residual_headroom_mw for result in results
+        ),
+        "post_attack_mean_trusted_destinations_with_positive_headroom": _mean(
+            result.trusted_destinations_with_positive_headroom
+            for result in results
+        ),
+        "time_to_first_feasible_corrective_action": (
+            -1
+            if first_feasible_tick is None
+            else int(first_feasible_tick) - int(attack_start_tick)
+        ),
+        "successful_corrective_migrations": sum(
+            result.executed_corrective_migrations_this_tick
+            for result in results
+        ),
+        "post_attack_scheduler_migration_decisions_raw": sum(
+            result.scheduler_migration_decisions_raw for result in results
+        ),
+        "post_attack_scheduler_migration_decisions_to_trusted_capacity_feasible": sum(
+            result.scheduler_migration_decisions_to_trusted_capacity_feasible
+            for result in results
+        ),
+        "post_attack_safety_allowed_migrations": sum(
+            result.safety_allowed_migrations for result in results
+        ),
+        "post_attack_safety_explicit_block_migrations": sum(
+            result.safety_explicit_block_migrations for result in results
+        ),
+        "post_attack_safety_raw_migrations_removed_or_converted": sum(
+            result.safety_raw_migrations_removed_or_converted
+            for result in results
+        ),
+        "post_attack_safety_blocked_migrations": sum(
+            result.safety_blocked_migrations for result in results
+        ),
+        "post_attack_executed_migrations": sum(
+            result.executed_migrations_this_tick for result in results
+        ),
+        "post_attack_executed_corrective_migrations": sum(
+            result.executed_corrective_migrations_this_tick
+            for result in results
+        ),
+    }
+
+
+def _mean(values) -> float:
+    values = list(values)
+    return sum(values) / len(values) if values else 0.0
 
 
 def _grid_metadata(orch: GridShiftOrchestrator, metadata: dict | None) -> dict:
