@@ -107,6 +107,7 @@ class SafetyController:
         decisions: List[Decision],
         trust_by_node: Dict[str, TrustLevel],
         fleet: DataCenterFleet,
+        observed_load_by_node: Dict[str, float] | None = None,
     ) -> Tuple[List[Decision], bool]:
         bad_nodes = {n for n, lvl in trust_by_node.items()
                      if lvl != TrustLevel.TRUSTED}
@@ -181,12 +182,21 @@ class SafetyController:
 
         # 2. Observed-load override: grid-side sensor is authoritative.
         # This stays active under every policy for hard safety protection.
-        filtered.extend(self._observed_load_unwinds(fleet, bad_nodes))
+        filtered.extend(
+            self._observed_load_unwinds(
+                fleet,
+                bad_nodes,
+                observed_load_by_node=observed_load_by_node,
+            )
+        )
 
         return filtered, safe_mode
 
     def _observed_load_unwinds(
-        self, fleet: DataCenterFleet, bad_nodes: set
+        self,
+        fleet: DataCenterFleet,
+        bad_nodes: set,
+        observed_load_by_node: Dict[str, float] | None = None,
     ) -> List[Decision]:
         """
         For any DC whose observed utilization is above LOCAL_UNWIND_UTILIZATION,
@@ -198,7 +208,12 @@ class SafetyController:
         for src_id, dc in fleet.dcs.items():
             if dc.capacity_mw <= 0:
                 continue
-            util = dc.observed_load_mw() / dc.capacity_mw
+            observed_load = (
+                observed_load_by_node[src_id]
+                if observed_load_by_node and src_id in observed_load_by_node
+                else dc.observed_load_mw()
+            )
+            util = observed_load / dc.capacity_mw
             if util < LOCAL_UNWIND_UTILIZATION:
                 continue
 

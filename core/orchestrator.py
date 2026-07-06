@@ -12,6 +12,7 @@ Every tick:
      (directional policy + observed-load override)
   6. Execute the surviving decisions
 """
+import random
 from typing import Optional
 from core.state import TickResult, TrustLevel, JobPriority, ActionType
 from core.grid_model import BostonGridModel, GridConfig
@@ -48,6 +49,7 @@ class GridShiftOrchestrator:
         self.provers: dict = {}
         self.tick_num = 0
         self.last_adversary_events: list[str] = []
+        self._observed_load_rng = random.Random((self.cfg.seed or seed) + 7919)
         self._bootstrap_provers()
 
     def _bootstrap_provers(self):
@@ -74,11 +76,13 @@ class GridShiftOrchestrator:
 
         # 2. Challenge each controller and verify
         assessments = []
+        observed_load_by_node = {}
         for dc_id, prover in self.provers.items():
             nonce = self.verifier.issue_nonce(dc_id)
             packet = prover.attest(nonce)
             verif = self.verifier.verify(packet)
-            observed = self.fleet.dcs[dc_id].observed_load_mw()
+            observed = self._observed_load_mw(dc_id)
+            observed_load_by_node[dc_id] = observed
             assessments.append(self.monitor.assess(
                 node_id=dc_id,
                 verification=verif,
@@ -98,7 +102,10 @@ class GridShiftOrchestrator:
             grid_state,
         )
         decisions, safe_mode = self.safety.apply(
-            raw_decisions, trust_by_node, self.fleet
+            raw_decisions,
+            trust_by_node,
+            self.fleet,
+            observed_load_by_node=observed_load_by_node,
         )
         actuation_diagnostics.update(
             self._actuation_diagnostics_after_safety(raw_decisions, decisions)
@@ -149,6 +156,19 @@ class GridShiftOrchestrator:
             **migration_feasibility,
             **actuation_diagnostics,
         )
+
+    def _observed_load_mw(self, dc_id: str) -> float:
+        observed = self.fleet.dcs[dc_id].observed_load_mw()
+        bias = float(getattr(self.cfg, "observed_load_bias_mw", 0.0))
+        noise_std = float(getattr(self.cfg, "observed_load_noise_std_mw", 0.0))
+        if bias == 0.0 and noise_std == 0.0:
+            return observed
+        noise = (
+            self._observed_load_rng.gauss(0.0, noise_std)
+            if noise_std > 0.0
+            else 0.0
+        )
+        return max(0.0, observed + bias + noise)
 
     def _migration_feasibility_diagnostics(self, trust_by_node: dict) -> dict:
         candidates = 0

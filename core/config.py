@@ -39,6 +39,8 @@ class SimConfig:
 
     # ---- grid sensing (Mehran) ----
     noise_sigma_mw: float = 0.0             # grid-side sensor noise std; Mehran sets default
+    observed_load_noise_std_mw: float = 0.0 # experiment-only observed-load noise
+    observed_load_bias_mw: float = 0.0      # experiment-only observed-load bias
 
     # ---- policy (Ayush) ----
     policy: str = "directional"             # "none" | "freeze" | "directional"
