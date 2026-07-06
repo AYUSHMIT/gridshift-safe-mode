@@ -96,6 +96,33 @@ experiments/results/tcae_feasibility_vs_overload_delta.png
 
 Do not commit those generated outputs unless the artifact policy changes.
 
+## Mechanism Audit
+
+After regenerating the paired and regime-summary CSVs, run the compact
+mechanism audit:
+
+```bash
+.venv/bin/python -m experiments.audit_tcae_mechanism
+```
+
+This reads:
+
+```text
+experiments/results/tcae_phase_headroom_paired.csv
+experiments/results/tcae_phase_headroom_regime_summary.csv
+```
+
+and writes generated reviewer-inspection artifacts:
+
+```text
+experiments/results/tcae_mechanism_audit.csv
+experiments/results/tcae_mechanism_audit.md
+```
+
+The audit classifies each phase/headroom regime as `consequential_envelope`,
+`latent_envelope`, or `no_envelope`. It is a mechanism-consistency check, not a
+new experiment and not a policy-dominance test.
+
 ## Reviewer Interpretation
 
 Directional control helps when trusted feasible migration opportunities are
