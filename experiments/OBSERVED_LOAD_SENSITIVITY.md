@@ -22,5 +22,18 @@ The output CSV is generated at:
 experiments/results/observed_load_sensitivity.csv
 ```
 
+Summarize each noise/bias setting against the zero-noise, zero-bias baseline for
+the same detector mode with:
+
+```bash
+.venv/bin/python -m experiments.analyze_observed_load_sensitivity
+```
+
+The summary Markdown is generated at:
+
+```text
+experiments/results/observed_load_sensitivity_summary.md
+```
+
 Generated CSVs under `experiments/results/` are ignored and should not be
 committed.
