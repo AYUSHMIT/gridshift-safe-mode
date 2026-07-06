@@ -96,6 +96,19 @@ python -m experiments.fig_dc
 CSV outputs are written to `experiments/results/` and figures are written to `experiments/figures/`.
 Generated PNG and CSV outputs are reproducibility artifacts and should not be committed unless explicitly needed.
 
+## Paper Artifact Map
+
+Generated CSVs, plots, and local external traces are intentionally not committed.
+Some workflows require locally prepared ISO-NE, Google ClusterData2019, or SWF
+inputs; the checked-in scripts document how those artifacts are derived.
+
+| Paper evidence | Purpose | Relevant files |
+|---|---|---|
+| ISO-NE peak-window policy comparison | Main policy comparison under measured aggregate grid baseline plus simulated data-center/adversarial load | `experiments/build_iso_ne_grid_summary.py`, `experiments/grid_trace_loader.py`, `experiments/run_trace_compare.py`, `experiments/run_trace_phase_headroom.py`, `data/grid/README.md` |
+| Google ClusterData2019 event-calibrated stress validation | Event-arrival and CPU-demand calibration; not full runtime or power-trace replay | `experiments/convert_google_power_trace.py`, `experiments/run_trace_compare.py`, `experiments/trace_loader.py`, `data/traces/README.md` |
+| Trusted actuation envelope sweep | Tests when remaining trusted outbound migration capacity becomes operationally useful | `experiments/analyze_tcae_phase_headroom.py`, `experiments/TCAE_REPRODUCIBILITY.md` |
+| SDSC BLUE SWF validation | Single aligned 50-tick HPC/SWF workload validation | `experiments/run_real_swf_workflow.py`, `experiments/analyze_swf_compare.py` |
+
 ### Trace-calibrated comparison
 
 ```bash
