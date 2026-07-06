@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Generated GridShift experiment artifacts
+data/grid/iso_ne_grid_derived_5min.csv
+data/traces/google_cluster_sample.csv
+experiments/results/
