@@ -12,7 +12,7 @@ from experiments.metrics import ensure_dir, summarize_runs, write_rows_csv
 from experiments.trial_runner import TrialSpec, run_trial
 from experiments.workloads import DerivedTraceWorkloadSource, SyntheticWorkloadSource
 
-SEEDS = list(range(10))
+SEEDS = list(range(500))
 TICKS = 50
 INITIAL_BURST = 30
 STEADY_BURST = 5
