@@ -34,7 +34,7 @@ from core.state import TrustLevel
 
 # ---- experiment configuration ----
 DETECTOR_MODES = ["attestation-only", "behavior-only", "fusion"]
-SEEDS = list(range(10))
+SEEDS = list(range(500))
 TICKS = 50
 INITIAL_BURST = 30
 STEADY_BURST = 5

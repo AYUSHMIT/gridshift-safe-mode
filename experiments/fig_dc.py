@@ -15,7 +15,7 @@ Produces a 2-panel figure:
 This experiment ISOLATES the effect of workload intensity: it runs under
 the directional policy with NO adversary, so the load signal is not masked
 by the attack (the policy/detector/robustness figures carry the adversarial
-story). 10 seeds.
+story). 500 seeds.
 
 Run:  python -m experiments.fig_dc
 """
@@ -29,7 +29,7 @@ from core.config import SimConfig
 from core.orchestrator import GridShiftOrchestrator
 
 TICKS = 50
-SEEDS = list(range(10))
+SEEDS = list(range(500))
 LOAD_LEVELS = [4, 8, 12, 16, 20, 24]   # jobs injected per 5-tick interval
 OUTDIR = os.path.join(os.path.dirname(__file__), "figures")
 
