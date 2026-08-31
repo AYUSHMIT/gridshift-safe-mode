@@ -203,7 +203,7 @@ def make_figure(agg: dict) -> str:
     axes[0].legend(fontsize=8)   # label the two attack cases
 
     fig.suptitle(
-        "GridShift detector comparison under scheduled adversary",
+        "Detector comparison under scheduled adversary",
         fontsize=14,
         y=0.98,
     )

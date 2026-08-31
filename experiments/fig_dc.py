@@ -118,7 +118,7 @@ def make_figure(agg):
     ax2.set_ylabel("Migrations begun", color="#2ca02c")
     ax2.tick_params(axis="y", labelcolor="#2ca02c")
 
-    fig.suptitle("GridShift DC module — safety/availability trade-off and migration cost",
+    fig.suptitle("Directional safe mode — safety-availability trade-off and migration cost",
                  fontsize=12, y=1.02)
     fig.tight_layout()
     png = os.path.join(OUTDIR, "fig_dc_tradeoff.png")

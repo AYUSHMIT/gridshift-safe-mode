@@ -89,7 +89,7 @@ def make_figure(data):
         ax.set_xlabel("Compromised fraction (%)")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
-    fig.suptitle("GridShift robustness vs. adversary-controlled fraction "
+    fig.suptitle("Robustness vs. adversary-controlled fraction "
                  "(fusion detector, 500 seeds, 95% CI)", fontsize=12, y=1.01)
     fig.tight_layout()
     png = os.path.join(OUTDIR, "fig_robustness.png")

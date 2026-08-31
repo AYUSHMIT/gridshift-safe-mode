@@ -178,7 +178,7 @@ def make_figure(rows: dict[str, dict[str, str]]) -> None:
         percent=True,
     )
     fig.suptitle(
-        "GridShift policy comparison, ISO-NE peak-window synthetic workload",
+        "Policy comparison, ISO-NE peak-window synthetic workload",
         fontsize=14,
         y=0.98,
     )
