@@ -3,10 +3,10 @@
 Robustness sweep: how the three policies degrade as the adversary controls
 a larger fraction of the fleet. Addresses the "results look hand-tuned"
 concern by sweeping compromised_fraction instead of fixing it at 0.34, and
-uses 20 seeds to tighten the confidence intervals.
+uses 500 seeds to tighten the confidence intervals.
 
 For each (policy, compromised_fraction): scheduled fusion-detector attack,
-20 seeds. Metrics: grid-overload exceedance, completion rate, SLA-violation
+500 seeds. Metrics: grid-overload exceedance, completion rate, SLA-violation
 rate, and compromised-node load exposure (job MW.ticks on untrusted nodes).
 
 Run:  python -m experiments.fig_robustness
@@ -22,7 +22,7 @@ from core.orchestrator import GridShiftOrchestrator
 
 POLICIES = ["none", "freeze", "directional"]
 FRACTIONS = [0.0, 0.11, 0.22, 0.33, 0.44, 0.56]   # 0..5 of 9 DCs
-SEEDS = list(range(20))
+SEEDS = list(range(500))
 TICKS, INITIAL_BURST, STEADY_BURST = 50, 30, 5
 OUTDIR = os.path.join(os.path.dirname(__file__), "figures")
 COLORS = {"none": "#1f77b4", "freeze": "#d62728", "directional": "#2ca02c"}
@@ -89,8 +89,8 @@ def make_figure(data):
         ax.set_xlabel("Compromised fraction (%)")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
-    fig.suptitle("GridShift robustness vs. adversary-controlled fraction "
-                 "(fusion detector, 20 seeds, 95% CI)", fontsize=12, y=1.01)
+    fig.suptitle("Robustness vs. adversary-controlled fraction "
+                 "(fusion detector, 500 seeds, 95% CI)", fontsize=12, y=1.01)
     fig.tight_layout()
     png = os.path.join(OUTDIR, "fig_robustness.png")
     fig.savefig(png, dpi=150, bbox_inches="tight")

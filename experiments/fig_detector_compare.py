@@ -34,7 +34,7 @@ from core.state import TrustLevel
 
 # ---- experiment configuration ----
 DETECTOR_MODES = ["attestation-only", "behavior-only", "fusion"]
-SEEDS = list(range(10))
+SEEDS = list(range(500))
 TICKS = 50
 INITIAL_BURST = 30
 STEADY_BURST = 5
@@ -203,7 +203,7 @@ def make_figure(agg: dict) -> str:
     axes[0].legend(fontsize=8)   # label the two attack cases
 
     fig.suptitle(
-        "GridShift detector comparison under scheduled adversary",
+        "Detector comparison under scheduled adversary",
         fontsize=14,
         y=0.98,
     )
