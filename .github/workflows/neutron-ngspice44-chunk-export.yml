@@ -1,0 +1,31 @@
+name: Temporary pure-shell ngspice 44.2 export
+on:
+  push:
+    branches:
+      - tmp/neutron-ngspice44-export-20260902
+    paths:
+      - .github/workflows/neutron-ngspice44-chunk-export.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and publish temporary release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch v44.2.1 https://github.com/silicon-vlsi-org/eda-ngspice.git /tmp/eda-ngspice
+          test -x /tmp/eda-ngspice/glnxa64/bin/ngspice || chmod +x /tmp/eda-ngspice/glnxa64/bin/ngspice
+          tar -C /tmp/eda-ngspice/glnxa64 -czf /tmp/ngspice-44.2.1-linux-x86_64-bin.tar.gz bin/ngspice
+          sha256sum /tmp/ngspice-44.2.1-linux-x86_64-bin.tar.gz > /tmp/ngspice-44.2.1-linux-x86_64-bin.tar.gz.sha256
+          gh release delete neutron-ngspice44-temp --repo "$REPO" --yes || true
+          gh release create neutron-ngspice44-temp \
+            /tmp/ngspice-44.2.1-linux-x86_64-bin.tar.gz \
+            /tmp/ngspice-44.2.1-linux-x86_64-bin.tar.gz.sha256 \
+            --repo "$REPO" \
+            --title "Temporary ngspice 44.2.1 export" \
+            --notes "Temporary validation asset; remove after Revision F investigation."
